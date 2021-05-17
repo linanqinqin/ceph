@@ -18,6 +18,7 @@ set(rbd_srcs
   action/Copy.cc
   action/Create.cc
   action/Device.cc
+  action/Dfork.cc
   action/Diff.cc
   action/DiskUsage.cc
   action/Encryption.cc
