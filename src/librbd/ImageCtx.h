@@ -157,6 +157,9 @@ namespace librbd {
     uint8_t order;
     uint64_t size;
     uint64_t features;
+    /* linanqinqin */
+    uint8_t dirty;
+    /* end */
     std::string object_prefix;
     char *format_string;
     std::string header_oid;

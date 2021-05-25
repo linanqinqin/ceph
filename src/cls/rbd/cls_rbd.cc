@@ -44,6 +44,10 @@
 
 #include <boost/algorithm/string/predicate.hpp>
 
+/* linanqinqin */
+#define LNQQ_DOUT_cls_rbd_LVL 100
+/* end */
+
 using std::istringstream;
 using std::ostringstream;
 using std::map;
@@ -766,6 +770,9 @@ int detach(cls_method_context_t hctx, bool legacy_api) {
  */
 int create(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
+  /* linanqinqin */
+  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin: %s", __func__);
+  /* end */
   string object_prefix;
   uint64_t features, size;
   uint8_t order;
@@ -827,6 +834,13 @@ int create(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   omap_vals["create_timestamp"] = timestampbl;
   omap_vals["access_timestamp"] = timestampbl;
   omap_vals["modify_timestamp"] = timestampbl;
+
+  /* linanqinqin */
+  uint8_t dirty = 9;
+  bufferlist dirtybl;
+  encode(dirty, dirtybl);
+  omap_vals["dfork_dirty"] = dirtybl;
+  /* end */
 
   if ((features & RBD_FEATURE_OPERATIONS) != 0ULL) {
     CLS_ERR("Attempting to set internal feature: operations");
@@ -1077,6 +1091,32 @@ int set_size(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   return 0;
 }
+
+/* linanqinqin */
+/**
+ * Input:
+ * none
+ *
+ * Output:
+ * @param dirty_bit the dirty bit value of the image (uint8_t)
+ * @returns 0 on success, negative error code on failure
+ */
+int get_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  uint8_t dirty;
+  int r = read_key(hctx, "dfork_dirty", &dirty);
+  if (r < 0) {
+    CLS_ERR("failed to read the dirty bit off of disk: %s", cpp_strerror(r).c_str());
+    return r;
+  }
+
+  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "get_dfork_dirty=%u", (uint32_t)dirty);
+
+  encode(dirty, *out);
+
+  return 0;
+}
+/* end */
 
 /**
  * get the current protection status of the specified snapshot
@@ -8087,6 +8127,9 @@ CLS_INIT(rbd)
   cls_method_handle_t h_set_features;
   cls_method_handle_t h_get_size;
   cls_method_handle_t h_set_size;
+  /* linanqinqin */
+  cls_method_handle_t h_get_dfork_dirty;
+  /* end */
   cls_method_handle_t h_get_parent;
   cls_method_handle_t h_set_parent;
   cls_method_handle_t h_remove_parent;
@@ -8229,6 +8272,11 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "set_size",
 			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  set_size, &h_set_size);
+  /* linanqinqin */
+  cls_register_cxx_method(h_class, "get_dfork_dirty",
+        CLS_METHOD_RD,
+        get_dfork_dirty, &h_get_dfork_dirty);
+  /* end */
   cls_register_cxx_method(h_class, "get_snapcontext",
 			  CLS_METHOD_RD,
 			  get_snapcontext, &h_get_snapcontext);

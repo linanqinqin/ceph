@@ -216,6 +216,22 @@ void set_size(librados::ObjectWriteOperation *op, uint64_t size)
   op->exec("rbd", "set_size", bl);
 }
 
+/* linanqinqin */
+void get_dfork_dirty_start(librados::ObjectReadOperation *op) {
+  bufferlist bl;
+  op->exec("rbd", "get_dfork_dirty", bl);
+}
+
+int get_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
+  try {
+    decode(*dirty, *it);
+  } catch (const ceph::buffer::error &err) {
+    return -EBADMSG;
+  }
+  return 0;
+}
+/* end */
+
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id) {
   bufferlist in_bl;
   encode(static_cast<snapid_t>(snap_id), in_bl);

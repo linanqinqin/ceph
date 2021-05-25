@@ -107,6 +107,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
       extra_read_flags(0),
       old_format(false),
       order(0), size(0), features(0),
+      /* linanqinqin */
+      dirty(0),
+      /* end */
       format_string(NULL),
       id(image_id), parent(NULL),
       stripe_unit(0), stripe_count(0), flags(0),

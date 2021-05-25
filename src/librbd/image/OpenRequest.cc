@@ -22,6 +22,10 @@
 #undef dout_prefix
 #define dout_prefix *_dout << "librbd::image::OpenRequest: "
 
+/* linanqinqin */
+#define LNQQ_DOUT_OpenReq_LVL 0
+/* end */
+
 namespace librbd {
 namespace image {
 
@@ -260,6 +264,9 @@ void OpenRequest<I>::send_v2_get_initial_metadata() {
 
   librados::ObjectReadOperation op;
   cls_client::get_size_start(&op, CEPH_NOSNAP);
+  /* linanqinqin */
+  cls_client::get_dfork_dirty_start(&op);
+  /* end */
   cls_client::get_object_prefix_start(&op);
   cls_client::get_features_start(&op, true);
 
@@ -276,12 +283,28 @@ template <typename I>
 Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
   CephContext *cct = m_image_ctx->cct;
   ldout(cct, 10) << __func__ << ": r=" << *result << dendl;
+  /* linanqinqin */
+  // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ":" << (int)m_image_ctx->order << dendl;
+  /* end */
 
   auto it = m_out_bl.cbegin();
   if (*result >= 0) {
     uint64_t size;
     *result = cls_client::get_size_finish(&it, &size, &m_image_ctx->order);
+    /* linanqinqin */
+    // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ":" << (int)m_image_ctx->order << dendl;
+    /* end */
   }
+  /* linanqinqin */
+  // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ":" << (int)m_image_ctx->order << dendl;
+  /* end */
+  
+  /* linanqinqin */
+  if (*result >= 0) {
+    *result = cls_client::get_dfork_dirty_finish(&it, &m_image_ctx->dirty);
+  }
+  // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ":" << (int)m_image_ctx->dirty << dendl;
+  /* end */
 
   if (*result >= 0) {
     *result = cls_client::get_object_prefix_finish(&it,

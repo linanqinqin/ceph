@@ -550,6 +550,9 @@ public:
 
   int old_format(uint8_t *old);
   int size(uint64_t *size);
+  /* linanqinqin */
+  int dirty(uint8_t *dirty);
+  /* end */
   int get_group(group_info_t *group_info, size_t group_info_size);
   int features(uint64_t *features);
   int update_features(uint64_t features, bool enabled);

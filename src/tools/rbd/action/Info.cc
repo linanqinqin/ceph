@@ -89,6 +89,9 @@ static int do_show_info(librados::IoCtx &io_ctx, librbd::Image& image,
 {
   librbd::image_info_t info;
   uint8_t old_format;
+  /* linanqinqin */
+  uint8_t dirty;
+  /* end */
   uint64_t overlap, features, flags, snap_limit;
   bool snap_protected = false;
   librbd::mirror_image_info_t mirror_image;
@@ -112,6 +115,12 @@ static int do_show_info(librados::IoCtx &io_ctx, librbd::Image& image,
   r = image.old_format(&old_format);
   if (r < 0)
     return r;
+
+  /* linanqinqin */
+  r = image.dirty(&dirty);
+  if (r < 0)
+    return r;
+  /* end */
 
   std::string imgid;
   if (!old_format) {
@@ -231,6 +240,9 @@ static int do_show_info(librados::IoCtx &io_ctx, librbd::Image& image,
     f->dump_int("order", info.order);
     f->dump_unsigned("object_size", info.obj_size);
     f->dump_int("snapshot_count", snaps.size());
+    /* linanqinqin */
+    f->dump_int("dirty", (int)dirty);
+    /* end */
     if (!data_pool.empty()) {
       f->dump_string("data_pool", data_pool);
     }
@@ -245,6 +257,10 @@ static int do_show_info(librados::IoCtx &io_ctx, librbd::Image& image,
               << " (" << byte_u_t(info.obj_size) << " objects)"
               << std::endl
               << "\tsnapshot_count: " << snaps.size()
+              << std::endl
+              /* linanqinqin */
+              << "\tdirty: " << (int)dirty
+              /* end */
               << std::endl;
     if (!imgid.empty()) {
       std::cout << "\tid: " << imgid << std::endl;

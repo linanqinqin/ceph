@@ -82,6 +82,9 @@ namespace librbd {
   int info(ImageCtx *ictx, image_info_t& info, size_t image_size);
   int get_old_format(ImageCtx *ictx, uint8_t *old);
   int get_size(ImageCtx *ictx, uint64_t *size);
+  /* linanqinqin */
+  int get_dirty(ImageCtx *ictx, uint8_t *dirty);
+  /* end */
   int get_features(ImageCtx *ictx, uint64_t *features);
   int get_overlap(ImageCtx *ictx, uint64_t *overlap);
   int get_flags(ImageCtx *ictx, uint64_t *flags);

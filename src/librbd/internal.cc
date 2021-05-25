@@ -62,6 +62,10 @@
 #include <boost/variant.hpp>
 #include "include/ceph_assert.h"
 
+/* linanqinqin */
+#define LNQQ_DOUT_internal_LVL 100
+/* end */
+
 #define dout_subsys ceph_subsys_rbd
 #undef dout_prefix
 #define dout_prefix *_dout << "librbd: "
@@ -640,6 +644,9 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
     CephContext *cct = (CephContext *)io_ctx.cct();
     uint64_t option;
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_internal_LVL) << __func__ << "(8)" << dendl;
+    /* end */
     if (opts.get(RBD_IMAGE_OPTION_FLATTEN, &option) == 0) {
       lderr(cct) << "create does not support 'flatten' image option" << dendl;
       return -EINVAL;
@@ -688,6 +695,10 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
       lderr(cct) << "Forced V1 image creation. " << dendl;
       r = create_v1(io_ctx, image_name.c_str(), size, order);
     } else {
+      /* linanqinqin */
+      ldout(cct, LNQQ_DOUT_internal_LVL) << __func__ << "(8)" 
+                                         << " old_format=false" << dendl;
+      /* end */
       AsioEngine asio_engine(io_ctx);
 
       ConfigProxy config{cct->_conf};
@@ -861,6 +872,18 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     *size = ictx->get_effective_image_size(ictx->snap_id);
     return 0;
   }
+
+  /* linanqinqin */
+  int get_dirty(ImageCtx *ictx, uint8_t *dirty)
+  {
+    int r = ictx->state->refresh_if_required();
+    if (r < 0)
+      return r;
+    std::shared_lock l{ictx->image_lock};
+    *dirty = ictx->dirty;
+    return 0;
+  }
+  /* end */
 
   int get_features(ImageCtx *ictx, uint64_t *features)
   {
