@@ -1116,6 +1116,50 @@ int get_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
 
   return 0;
 }
+
+/**
+ * Input:
+ * @param dirty_bit the new dirty bit value of the image (uint8_t)
+ *
+ * Output:
+ * @returns 0 on success, negative error code on failure
+ */
+int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  uint8_t dirty;
+
+  // currently not taking input
+  // auto iter = in->cbegin();
+  // try {
+  //   decode(dirty, iter);
+  // } catch (const ceph::buffer::error &err) {
+  //   return -EINVAL;
+  // }
+
+  // check that the dirty bit exists to make sure this is a header object
+  // that was created correctly
+  uint8_t orig_dirty;
+  int r = read_key(hctx, "dfork_dirty", &orig_dirty);
+  if (r < 0) {
+    CLS_ERR("Could not read image's dirty bit off disk: %s", cpp_strerror(r).c_str());
+    return r;
+  }
+
+  dirty = orig_dirty+1;
+  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "set_dfork_dirty dirty=%u orig_dirty=%u", (uint32_t)dirty,
+          (uint32_t)orig_dirty);
+
+  // write the new dirty bit 
+  bufferlist dirtybl;
+  encode(dirty, dirtybl);
+  r = cls_cxx_map_set_val(hctx, "dfork_dirty", &dirtybl);
+  if (r < 0) {
+    CLS_ERR("error writing snapshot metadata: %s", cpp_strerror(r).c_str());
+    return r;
+  }
+
+  return 0;
+}
 /* end */
 
 /**
@@ -8129,6 +8173,7 @@ CLS_INIT(rbd)
   cls_method_handle_t h_set_size;
   /* linanqinqin */
   cls_method_handle_t h_get_dfork_dirty;
+  cls_method_handle_t h_set_dfork_dirty;
   /* end */
   cls_method_handle_t h_get_parent;
   cls_method_handle_t h_set_parent;
@@ -8276,6 +8321,9 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "get_dfork_dirty",
         CLS_METHOD_RD,
         get_dfork_dirty, &h_get_dfork_dirty);
+  cls_register_cxx_method(h_class, "set_dfork_dirty",
+        CLS_METHOD_RD | CLS_METHOD_WR,
+        set_dfork_dirty, &h_set_dfork_dirty);
   /* end */
   cls_register_cxx_method(h_class, "get_snapcontext",
 			  CLS_METHOD_RD,

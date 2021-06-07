@@ -230,6 +230,12 @@ int get_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
   }
   return 0;
 }
+
+void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty) {
+  bufferlist bl;
+  encode(dirty, bl);
+  op->exec("rbd", "set_dfork_dirty", bl);
+}
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id) {

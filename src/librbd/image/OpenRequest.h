@@ -108,6 +108,11 @@ private:
   void send_v2_get_initial_metadata();
   Context *handle_v2_get_initial_metadata(int *result);
 
+  /* linanqinqin */
+  void send_set_dfork_dirty();
+  Context *handle_set_dfork_dirty(int *result);
+  /* end */
+
   void send_v2_get_stripe_unit_count();
   Context *handle_v2_get_stripe_unit_count(int *result);
 
