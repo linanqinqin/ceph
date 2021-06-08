@@ -23,7 +23,7 @@
 #define dout_prefix *_dout << "librbd::image::OpenRequest: "
 
 /* linanqinqin */
-#define LNQQ_DOUT_OpenReq_LVL 0
+#define LNQQ_DOUT_OpenReq_LVL 100
 /* end */
 
 namespace librbd {
