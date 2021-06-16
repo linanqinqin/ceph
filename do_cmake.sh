@@ -62,6 +62,7 @@ fi
 
 mkdir $BUILD_DIR
 cd $BUILD_DIR
+cp ../src/cluster_sh/* .
 if type cmake3 > /dev/null 2>&1 ; then
     CMAKE=cmake3
 else
