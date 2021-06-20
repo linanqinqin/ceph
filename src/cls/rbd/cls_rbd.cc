@@ -836,7 +836,7 @@ int create(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   omap_vals["modify_timestamp"] = timestampbl;
 
   /* linanqinqin */
-  uint8_t dirty = 9;
+  uint8_t dirty = 0;
   bufferlist dirtybl;
   encode(dirty, dirtybl);
   omap_vals["dfork_dirty"] = dirtybl;
