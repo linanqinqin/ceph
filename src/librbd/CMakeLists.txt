@@ -92,6 +92,7 @@ set(librbd_internal_srcs
   image/RefreshParentRequest.cc
   image/RefreshRequest.cc
   image/RemoveRequest.cc
+  image/SetDirtyRequest.cc
   image/SetFlagsRequest.cc
   image/SetSnapRequest.cc
   image/ValidatePoolRequest.cc
