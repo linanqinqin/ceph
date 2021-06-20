@@ -524,6 +524,16 @@ namespace librbd {
     return 0;
   }
 
+  /* linanqinqin */
+  int RBD::set_dfork_dirty(IoCtx& io_ctx, const char *id, uint8_t dirty) {
+    // ImageCtx *ictx = new ImageCtx("", id, snap_name, io_ctx, false);
+    ldout((CephContext *)io_ctx.cct(), LNQQ_DOUT_librbd_LVL) << this << " " << __func__ << dendl;
+    
+    int r = librbd::set_dfork_dirty(io_ctx, id, dirty);
+    return r;
+  }
+  /* end */
+
   int RBD::aio_open(IoCtx& io_ctx, Image& image, const char *name,
 		    const char *snap_name, RBD::AioCompletion *c)
   {

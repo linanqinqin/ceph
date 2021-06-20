@@ -5,21 +5,13 @@
 #include "tools/rbd/Shell.h"
 #include "tools/rbd/Utils.h"
 #include "include/types.h"
-#include "include/stringify.h"
 #include "common/errno.h"
-#include "common/Formatter.h"
-#include "common/TextTable.h"
 #include <iostream>
 #include <boost/program_options.hpp>
-#include <boost/bind/bind.hpp>
 
 namespace rbd {
 namespace action {
 namespace dfork {
-
-using namespace boost::placeholders;
-
-static const std::string ALL_NAME("all");
 
 namespace at = argument_types;
 namespace po = boost::program_options;
@@ -156,9 +148,78 @@ int execute_create(const po::variables_map &vm,
   return 0;
 }
 
+static int do_set_dfork_dirty_by_id(const std::string &pool_name, 
+                                    const std::string &namespace_name, 
+                                    const std::string &image_id,
+                                    uint8_t dirty) {
+  librados::Rados rados; 
+  librados::IoCtx io_ctx;
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = rbd.set_dfork_dirty(io_ctx, image_id.c_str(), dirty);
+  if (r < 0) {
+    std::cerr << "rbd: error setting the dfork dirty bit: "
+              << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
+void get_set_dirty_arguments(po::options_description *positional,
+                          po::options_description *options) {
+  positional->add_options()
+    (at::IMAGE_ID.c_str(), "image id\n(example: [<pool-name>/[<namespace>/]]<image-id>)");
+  options->add_options()
+    ("set", po::bool_switch(), "set the dirty bit");
+  options->add_options()
+    ("clear", po::bool_switch(), "clear the dirty bit");
+}
+
+int execute_set_dirty(const po::variables_map &vm,
+                   const std::vector<std::string> &ceph_global_init_args) {
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_id;
+  bool is_set, is_clear;
+
+  int r = utils::get_pool_image_id(vm, &arg_index, &pool_name, &namespace_name,
+                                   &image_id);
+  if (r < 0) {
+    return r;
+  }
+
+  is_set = vm["set"].as<bool>();
+  is_clear = vm["clear"].as<bool>();
+  if (!is_set && !is_clear) {
+    std::cerr << "rbd: no set/clear action specified" << std::endl;
+    return -EINVAL;
+  }
+  if (is_set && is_clear) {
+    std::cerr << "rbd: both set and clear actions specified" << std::endl;
+    return -EINVAL;
+  }
+
+  r = do_set_dfork_dirty_by_id(pool_name, namespace_name, image_id, 
+                               is_set?1:0);
+  if (r < 0) {
+    std::cerr << "rbd: set dfork dirty error: " << cpp_strerror(r) << std::endl;
+    return -r;
+  }
+
+  return 0;
+}
+
 Shell::Action action_create(
   {"dfork", "create"}, {}, "dfork a disk image.", "",
   &get_create_arguments, &execute_create);
+Shell::Action action_set_dirty(
+  {"dfork", "dirty"}, {}, "Set the dfork dirty bit", "",
+  &get_set_dirty_arguments, &execute_set_dirty);
 
 } // namespace dfork
 } // namespace action

@@ -44,6 +44,9 @@
 #include "librbd/image/CloneRequest.h"
 #include "librbd/image/CreateRequest.h"
 #include "librbd/image/GetMetadataRequest.h"
+/* linanqinqin */
+#include "librbd/image/SetDirtyRequest.h"
+/* end */
 #include "librbd/image/Types.h"
 #include "librbd/io/AioCompletion.h"
 #include "librbd/io/ImageDispatchSpec.h"
@@ -874,6 +877,17 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
   }
 
   /* linanqinqin */
+  int set_dfork_dirty(IoCtx& io_ctx, const std::string &image_id, uint8_t dirty) {
+
+    C_SaferCond cond;
+    image::SetDirtyRequest<> *req = image::SetDirtyRequest<>::create(
+      io_ctx, image_id, dirty, &cond);
+    req->send();
+    int r = cond.wait();
+
+    return r;
+  }
+
   int get_dirty(ImageCtx *ictx, uint8_t *dirty)
   {
     int r = ictx->state->refresh_if_required();

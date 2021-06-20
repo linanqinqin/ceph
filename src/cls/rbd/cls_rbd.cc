@@ -1128,13 +1128,13 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
 
   uint8_t dirty;
 
-  // currently not taking input
-  // auto iter = in->cbegin();
-  // try {
-  //   decode(dirty, iter);
-  // } catch (const ceph::buffer::error &err) {
-  //   return -EINVAL;
-  // }
+  // taking input
+  auto iter = in->cbegin();
+  try {
+    decode(dirty, iter);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
 
   // check that the dirty bit exists to make sure this is a header object
   // that was created correctly
@@ -1145,7 +1145,7 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
     return r;
   }
 
-  dirty = orig_dirty+1;
+  // dirty = orig_dirty+1;
   CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "set_dfork_dirty dirty=%u orig_dirty=%u", (uint32_t)dirty,
           (uint32_t)orig_dirty);
 

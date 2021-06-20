@@ -262,6 +262,10 @@ void OpenRequest<I>::send_v2_get_initial_metadata() {
   m_image_ctx->old_format = false;
   m_image_ctx->header_oid = util::header_name(m_image_ctx->id);
 
+  /* linanqinqin */
+  ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ": " << m_image_ctx->header_oid << dendl;
+  /* end */
+
   librados::ObjectReadOperation op;
   cls_client::get_size_start(&op, CEPH_NOSNAP);
   /* linanqinqin */
@@ -325,7 +329,7 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
   }
 
   /* linanqinqin */
-  send_set_dfork_dirty();
+  // send_set_dfork_dirty();
   /* end */
 
   if (m_image_ctx->test_features(RBD_FEATURE_STRIPINGV2)) {
@@ -341,7 +345,7 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
 template <typename I>
 void OpenRequest<I>::send_set_dfork_dirty() {
   CephContext *cct = m_image_ctx->cct;
-  ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << dendl;
+  // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << dendl;
 
   librados::ObjectWriteOperation op;
   cls_client::set_dfork_dirty(&op, 17);
@@ -349,6 +353,9 @@ void OpenRequest<I>::send_set_dfork_dirty() {
   using klass = OpenRequest<I>;
   librados::AioCompletion *comp =
     create_rados_callback<klass, &klass::handle_set_dfork_dirty>(this);
+  /* linanqinqin */
+  ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ": " << m_image_ctx->header_oid << dendl;
+  /* end */
   int r = m_image_ctx->md_ctx.aio_operate(m_image_ctx->header_oid, comp, &op);
   ceph_assert(r == 0);
   comp->release();
@@ -358,7 +365,7 @@ template <typename I>
 Context *OpenRequest<I>::handle_set_dfork_dirty(int *result) {
   CephContext *cct = m_image_ctx->cct;
   ldout(cct, 10) << __func__ << ": r=" << *result << dendl;
-  ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ": r=" << *result << dendl;
+  // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ": r=" << *result << dendl;
 
   if (*result < 0) {
     lderr(cct) << "set_dfork_dirty failed: " << cpp_strerror(*result)

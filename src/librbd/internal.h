@@ -83,6 +83,7 @@ namespace librbd {
   int get_old_format(ImageCtx *ictx, uint8_t *old);
   int get_size(ImageCtx *ictx, uint64_t *size);
   /* linanqinqin */
+  int set_dfork_dirty(IoCtx& io_ctx, const std::string &image_id, uint8_t dirty);
   int get_dirty(ImageCtx *ictx, uint8_t *dirty);
   /* end */
   int get_features(ImageCtx *ictx, uint64_t *features);

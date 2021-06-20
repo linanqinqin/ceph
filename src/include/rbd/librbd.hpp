@@ -253,6 +253,9 @@ public:
   int open(IoCtx& io_ctx, Image& image, const char *name, const char *snapname);
   int open_by_id(IoCtx& io_ctx, Image& image, const char *id);
   int open_by_id(IoCtx& io_ctx, Image& image, const char *id, const char *snapname);
+  /* linanqinqin */
+  int set_dfork_dirty(IoCtx& io_ctx, const char *id, uint8_t dirty);
+  /* end */
   int aio_open(IoCtx& io_ctx, Image& image, const char *name,
 	       const char *snapname, RBD::AioCompletion *c);
   int aio_open_by_id(IoCtx& io_ctx, Image& image, const char *id,
