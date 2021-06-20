@@ -41,10 +41,10 @@ private:
   IoCtx m_io_ctx;
   std::string m_image_id;
   std::string m_header_obj;
-  Context *m_on_finish;
-
+  
   uint8_t m_dirty;
 
+  Context *m_on_finish;
   CephContext *m_cct;
   int m_error_result;
 
