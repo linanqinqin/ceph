@@ -212,3 +212,20 @@ To build the documentation, ensure that you are in the top-level
 
 	admin/build-doc
 
+
+## `dfork` manual
+
+See https://docs.ceph.com/en/latest/man/8/rbd/ for the general `rbd` man page
+
+#### Create/remove a dfork-ed disk image
+
+	rbd dfork create|add foo@dfoo        # dfoo = dfork(foo)
+	rbd dfork remove|rm  foo@dfoo        # remove the dfork-ed disk dfoo
+
+For creating a dfork-ed disk, there will be a intermediate snapshot named `foo-snap` associated with the parent image `foo`. There must *not* already be an image/snapshot named `foo-snap` for dfork create to succeed.
+
+#### Dirty bit actions
+
+	rbd dfork dirty <image-id> --set|--clear    # set/clear the dirty bit
+
+You must pass in the image id of the image, not the image name such as `foo`. The id of an image can be found with `rbd info <image-name>` under the `id` field in the output.
