@@ -47,6 +47,27 @@ int do_add_snap(librbd::Image& image, const char *snapname,
   return 0;
 }
 
+static int do_set_dfork_dirty_by_id(const std::string &pool_name, 
+                                    const std::string &namespace_name, 
+                                    const std::string &image_id,
+                                    uint8_t dirty) {
+  librados::Rados rados; 
+  librados::IoCtx io_ctx;
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = rbd.set_dfork_dirty(io_ctx, image_id.c_str(), dirty);
+  if (r < 0) {
+    std::cerr << "rbd: error setting the dfork dirty bit: "
+              << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
 void get_create_arguments(po::options_description *positional,
                           po::options_description *options) {
   at::add_snap_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
@@ -60,6 +81,7 @@ int execute_create(const po::variables_map &vm,
   std::string pool_name;
   std::string namespace_name;
   std::string image_name;
+  std::string image_id;
   std::string snap_name;
   std::string dfork_name;
   int r = utils::get_pool_image_snapshot_names(
@@ -82,15 +104,53 @@ int execute_create(const po::variables_map &vm,
   r = utils::init_and_open_image(pool_name, namespace_name, image_name, "", "",
                                  false, &rados, &io_ctx, &image);
   if (r < 0) {
+    std::cerr << "rbd: failed to open image" << cpp_strerror(r)
+              << std::endl;
     return r;
   }
 
+  /* get the image id */
+  uint8_t old_format;
+  r = image.old_format(&old_format);
+  if (r < 0) {
+    std::cerr << "rbd: image format not supported" << cpp_strerror(r)
+              << std::endl;
+    return r;
+  }
+  if (old_format) {
+    std::cerr << "rbd: image format not supported" << cpp_strerror(r)
+              << std::endl;
+    return r;
+  } 
+  else {
+    r = image.get_id(&image_id);
+    if (r < 0) {
+      std::cerr << "rbd: failed to get image id" << cpp_strerror(r)
+                << std::endl;
+      return r;
+    }
+  }
+
+  /* clear the dfork dirty bit */
+  uint8_t dirty;
+  r = image.dirty(&dirty);
+  if (r < 0)
+    return r;
+  if (dirty) {
+    r = do_set_dfork_dirty_by_id(pool_name, namespace_name, image_id, 0);
+    if (r < 0) {
+      std::cerr << "rbd: set dfork dirty error: " << cpp_strerror(r) << std::endl;
+      return -r;
+    }
+  }
+
+  /* create the snapshot */
   snap_name = image_name + "-snap";
   r = do_add_snap(image, snap_name.c_str(), flags,
                   vm[at::NO_PROGRESS].as<bool>());
   if (r < 0) {
-    cerr << "rbd: failed to create snapshot: " << cpp_strerror(r)
-         << std::endl;
+    std::cerr << "rbd: failed to create snapshot: " << cpp_strerror(r)
+              << std::endl;
     return r;
   }
 
@@ -143,27 +203,6 @@ int execute_create(const po::variables_map &vm,
     return r;
   } else if (r < 0) {
     std::cerr << "rbd: clone error: " << cpp_strerror(r) << std::endl;
-    return r;
-  }
-  return 0;
-}
-
-static int do_set_dfork_dirty_by_id(const std::string &pool_name, 
-                                    const std::string &namespace_name, 
-                                    const std::string &image_id,
-                                    uint8_t dirty) {
-  librados::Rados rados; 
-  librados::IoCtx io_ctx;
-  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
-  if (r < 0) {
-    return r;
-  }
-
-  librbd::RBD rbd;
-  r = rbd.set_dfork_dirty(io_ctx, image_id.c_str(), dirty);
-  if (r < 0) {
-    std::cerr << "rbd: error setting the dfork dirty bit: "
-              << cpp_strerror(r) << std::endl;
     return r;
   }
   return 0;
