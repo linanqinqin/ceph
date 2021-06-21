@@ -6,8 +6,11 @@
 #include "tools/rbd/Utils.h"
 #include "include/types.h"
 #include "common/errno.h"
+#include "include/stringify.h"
 #include <iostream>
 #include <boost/program_options.hpp>
+
+#define SNAP_SUFFIX "-snap"
 
 namespace rbd {
 namespace action {
@@ -38,6 +41,65 @@ int do_add_snap(librbd::Image& image, const char *snapname,
   utils::ProgressContext pc("Creating snap", no_progress);
   
   int r = image.snap_create2(snapname, flags, pc);
+  if (r < 0) {
+    pc.fail();
+    return r;
+  }
+
+  pc.finish();
+  return 0;
+}
+
+namespace {
+
+bool is_auto_delete_snapshot(librbd::Image* image,
+                             const librbd::snap_info_t &snap_info) {
+  librbd::snap_namespace_type_t namespace_type;
+  int r = image->snap_get_namespace_type(snap_info.id, &namespace_type);
+  if (r < 0) {
+    return false;
+  }
+
+  switch (namespace_type) {
+  case RBD_SNAP_NAMESPACE_TYPE_TRASH:
+    return true;
+  default:
+    return false;
+  }
+}
+
+} // anonymous namespace
+
+static int do_delete(librbd::RBD &rbd, librados::IoCtx& io_ctx,
+                     const char *imgname, bool no_progress)
+{
+  utils::ProgressContext pc("Removing image", no_progress);
+  int r = rbd.remove_with_progress(io_ctx, imgname, pc);
+  if (r < 0) {
+    pc.fail();
+    return r;
+  }
+  pc.finish();
+  return 0;
+}
+
+int do_unprotect_snap(librbd::Image& image, const char *snapname)
+{
+  int r = image.snap_unprotect(snapname);
+  if (r < 0)
+    return r;
+
+  return 0;
+}
+
+int do_remove_snap(librbd::Image& image, const char *snapname, bool force,
+       bool no_progress)
+{
+  uint32_t flags = force? RBD_SNAP_REMOVE_FORCE : 0;
+  int r = 0;
+  utils::ProgressContext pc("Removing snap", no_progress);
+
+  r = image.snap_remove2(snapname, flags, pc);
   if (r < 0) {
     pc.fail();
     return r;
@@ -145,7 +207,7 @@ int execute_create(const po::variables_map &vm,
   }
 
   /* create the snapshot */
-  snap_name = image_name + "-snap";
+  snap_name = image_name + SNAP_SUFFIX;
   r = do_add_snap(image, snap_name.c_str(), flags,
                   vm[at::NO_PROGRESS].as<bool>());
   if (r < 0) {
@@ -208,6 +270,168 @@ int execute_create(const po::variables_map &vm,
   return 0;
 }
 
+void get_remove_arguments(po::options_description *positional,
+                          po::options_description *options) {
+  at::add_snap_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
+  at::add_snap_create_options(options);
+  at::add_no_progress_option(options);
+}
+
+int execute_remove(const po::variables_map &vm,
+                   const std::vector<std::string> &ceph_global_init_args) {
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_name;
+  // std::string image_id;
+  std::string snap_name;
+  std::string dfork_name;
+  bool no_progress = vm[at::NO_PROGRESS].as<bool>();
+
+  int r = utils::get_pool_image_snapshot_names(
+    vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
+    &image_name, &dfork_name, true, utils::SNAPSHOT_PRESENCE_REQUIRED,
+    utils::SPEC_VALIDATION_SNAP);
+  if (r < 0) {
+    return r;
+  }
+
+  /* remove the cloned (dfork-ed) disk */
+  {
+  librados::Rados rados;
+  librados::IoCtx io_ctx;
+  r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  io_ctx.set_pool_full_try();
+
+  librbd::RBD rbd;
+  r = do_delete(rbd, io_ctx, dfork_name.c_str(), no_progress);
+  if (r < 0) {
+    if (r == -ENOTEMPTY) {
+      librbd::Image image;
+      std::vector<librbd::snap_info_t> snaps;
+      int image_r = utils::open_image(io_ctx, dfork_name, true, &image);
+      if (image_r >= 0) {
+        image_r = image.snap_list(snaps);
+      }
+      if (image_r >= 0) {
+        snaps.erase(std::remove_if(snaps.begin(), snaps.end(),
+                 [&image](const librbd::snap_info_t& snap) {
+                                     return is_auto_delete_snapshot(&image,
+                                                                    snap);
+                                   }),
+                    snaps.end());
+      }
+
+      if (!snaps.empty()) {
+        std::cerr << "rbd: image has snapshots - these must be deleted"
+                  << " with 'rbd snap purge' before the image can be removed."
+                  << std::endl;
+      } else {
+        std::cerr << "rbd: image has snapshots with linked clones - these must "
+                  << "be deleted or flattened before the image can be removed."
+                  << std::endl;
+      }
+    } else if (r == -EBUSY) {
+      std::cerr << "rbd: error: image still has watchers"
+                << std::endl
+                << "This means the image is still open or the client using "
+                << "it crashed. Try again after closing/unmapping it or "
+                << "waiting 30s for the crashed client to timeout."
+                << std::endl;
+    } else if (r == -EMLINK) {
+      librbd::Image image;
+      int image_r = utils::open_image(io_ctx, dfork_name, true, &image);
+      librbd::group_info_t group_info;
+      if (image_r == 0) {
+  image_r = image.get_group(&group_info, sizeof(group_info));
+      }
+      if (image_r == 0) {
+        std::string pool_name = "";
+        librados::Rados rados(io_ctx);
+        librados::IoCtx pool_io_ctx;
+        image_r = rados.ioctx_create2(group_info.pool, pool_io_ctx);
+        if (image_r < 0) {
+          pool_name = "<missing group pool " + stringify(group_info.pool) + ">";
+        } else {
+          pool_name = pool_io_ctx.get_pool_name();
+        }
+        std::cerr << "rbd: error: image belongs to a group "
+                  << pool_name << "/";
+        if (!io_ctx.get_namespace().empty()) {
+          std::cerr << io_ctx.get_namespace() << "/";
+        }
+        std::cerr << group_info.name;
+      } else
+  std::cerr << "rbd: error: image belongs to a group";
+
+      std::cerr << std::endl
+    << "Remove the image from the group and try again."
+    << std::endl;
+      image.close();
+    } else {
+      std::cerr << "rbd: delete error: " << cpp_strerror(r) << std::endl;
+    }
+    return r;
+  }
+  }
+
+  /* unprotect the snapshot */
+  librados::Rados rados;
+  librados::IoCtx io_ctx;
+  librbd::Image image;
+  r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  io_ctx.set_pool_full_try();
+
+  r = utils::open_image(io_ctx, image_name, false, &image);
+  if (r < 0) {
+    return r;
+  }
+
+  bool is_protected = false;
+  snap_name = image_name + SNAP_SUFFIX;
+  r = image.snap_is_protected(snap_name.c_str(), &is_protected);
+  if (r < 0) {
+    std::cerr << "rbd: unprotecting snap failed: " << cpp_strerror(r)
+              << std::endl;
+    return r;
+  } else if (!is_protected) {
+    std::cerr << "rbd: snap is already unprotected" << std::endl;
+    return -EINVAL;
+  }
+
+  r = do_unprotect_snap(image, snap_name.c_str());
+  if (r < 0) {
+    std::cerr << "rbd: unprotecting snap failed: " << cpp_strerror(r)
+              << std::endl;
+    return r;
+  }
+
+  /* remove the snapshot */
+  r = do_remove_snap(image, snap_name.c_str(), false, no_progress);
+
+  if (r < 0) {
+    if (r == -EBUSY) {
+      std::cerr << "rbd: snapshot "
+                << std::string("'") + snap_name + "'"
+                << " is protected from removal." << std::endl;
+    } else {
+      std::cerr << "rbd: failed to remove snapshot: " << cpp_strerror(r)
+                << std::endl;
+    }
+    return r;
+  }
+  
+  return 0;
+}
+
 void get_set_dirty_arguments(po::options_description *positional,
                           po::options_description *options) {
   positional->add_options()
@@ -254,8 +478,11 @@ int execute_set_dirty(const po::variables_map &vm,
 }
 
 Shell::Action action_create(
-  {"dfork", "create"}, {}, "dfork a disk image.", "",
+  {"dfork", "create"}, {"dfork", "add"}, "dfork a disk image.", "",
   &get_create_arguments, &execute_create);
+Shell::Action action_remove(
+  {"dfork", "remove"}, {"dfork", "rm"}, "remove a dfork-ed image.", "",
+  &get_remove_arguments, &execute_remove);
 Shell::Action action_set_dirty(
   {"dfork", "dirty"}, {}, "Set the dfork dirty bit", "",
   &get_set_dirty_arguments, &execute_set_dirty);
