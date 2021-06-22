@@ -1124,6 +1124,7 @@ int get_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
  * Output:
  * @returns 0 on success, negative error code on failure
  */
+std::mutex dfork_dirty_mtx;
 set<string> block_set;
 int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
@@ -1139,8 +1140,11 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
     return -EINVAL;
   }
 
+  dfork_dirty_mtx.lock();
+
   // check if blocked
   if (block_set.find(image_id)!=block_set.end()) {
+    dfork_dirty_mtx.unlock();
     CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dfork_dirty blocked");
     return -EOPNOTSUPP;
   }
@@ -1150,6 +1154,7 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
   uint8_t orig_dirty;
   int r = read_key(hctx, "dfork_dirty", &orig_dirty);
   if (r < 0) {
+    dfork_dirty_mtx.unlock();
     CLS_ERR("Could not read image's dirty bit off disk: %s", cpp_strerror(r).c_str());
     return r;
   }
@@ -1162,6 +1167,7 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
   bufferlist dirtybl;
   encode(dirty, dirtybl);
   r = cls_cxx_map_set_val(hctx, "dfork_dirty", &dirtybl);
+  dfork_dirty_mtx.unlock();
   if (r < 0) {
     CLS_ERR("error writing snapshot metadata: %s", cpp_strerror(r).c_str());
     return r;
@@ -1194,9 +1200,12 @@ int check_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out
     return -EINVAL;
   }
 
+  dfork_dirty_mtx.lock();
+
   uint8_t dirty;
   int r = read_key(hctx, "dfork_dirty", &dirty);
   if (r < 0) {
+    dfork_dirty_mtx.unlock();
     CLS_ERR("failed to read the dirty bit off of disk: %s", cpp_strerror(r).c_str());
     return r;
   }
@@ -1206,6 +1215,7 @@ int check_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out
     block_set.insert(image_id);
     CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin blocking %s!!!", image_id.c_str());
   }
+  dfork_dirty_mtx.unlock();
 
   encode(dirty, *out);
 
