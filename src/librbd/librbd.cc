@@ -48,7 +48,7 @@
 #include <vector>
 
 /* linanqinqin */
-#define LNQQ_DOUT_librbd_LVL 100
+#define LNQQ_DOUT_librbd_LVL 0
 /* end */
 
 #ifdef WITH_LTTNG
@@ -525,13 +525,40 @@ namespace librbd {
   }
 
   /* linanqinqin */
-  int RBD::set_dfork_dirty(IoCtx& io_ctx, const char *id, uint8_t dirty) {
-    // ImageCtx *ictx = new ImageCtx("", id, snap_name, io_ctx, false);
-    ldout((CephContext *)io_ctx.cct(), LNQQ_DOUT_librbd_LVL) << this << " " << __func__ << dendl;
-    
-    int r = librbd::set_dfork_dirty(io_ctx, id, dirty);
+  int RBD::set_dfork_dirty(IoCtx& io_ctx, const char *name, 
+                           const char *id, uint8_t dirty) {
+
+    int r = librbd::set_dfork_dirty(io_ctx, name, id, dirty);
     return r;
   }
+
+  int RBD::check_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id, 
+                             uint8_t *dirty, bool block) {
+
+    int r = librbd::check_dfork_dirty(io_ctx, name, id, dirty, block);
+    return r;
+  }
+
+  // int RBD::check_dfork_dirty(IoCtx& io_ctx, Image& image, const char *name,
+  //                            const char *id, bool block) {
+  //   ImageCtx *ictx = new ImageCtx("", id, nullptr, io_ctx, false);
+
+  //   if (image.ctx != NULL) {
+  //     ldout((CephContext *)io_ctx.cct(), LNQQ_DOUT_librbd_LVL) << this << " " << __func__ << " ictx not null" << dendl;
+  //     reinterpret_cast<ImageCtx*>(image.ctx)->state->close();
+  //     image.ctx = NULL;
+  //   }
+
+  //   // int r = librbd::check_dfork_dirty(ictx, block);
+  //   int r = librbd::set_dfork_dirty(io_ctx, id, 9);
+  //   if (r < 0) {
+  //     return r;
+  //   }
+
+  //   image.ctx = (image_ctx_t) ictx;   // trouble is here!
+  //   ldout((CephContext *)io_ctx.cct(), LNQQ_DOUT_librbd_LVL) << this << " " << __func__ << dendl;
+  //   return 0;
+  // }
   /* end */
 
   int RBD::aio_open(IoCtx& io_ctx, Image& image, const char *name,

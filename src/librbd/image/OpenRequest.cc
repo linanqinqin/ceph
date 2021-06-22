@@ -348,7 +348,7 @@ void OpenRequest<I>::send_set_dfork_dirty() {
   // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << dendl;
 
   librados::ObjectWriteOperation op;
-  cls_client::set_dfork_dirty(&op, 17);
+  cls_client::set_dfork_dirty(&op, 17, m_image_ctx->id);
 
   using klass = OpenRequest<I>;
   librados::AioCompletion *comp =

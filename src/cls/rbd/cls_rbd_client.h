@@ -59,7 +59,11 @@ void set_size(librados::ObjectWriteOperation *op, uint64_t size);
 /* linanqinqin */
 void get_dfork_dirty_start(librados::ObjectReadOperation *op);
 int get_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty);
-void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty);
+void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty, 
+                     const std::string &id);
+void check_dfork_dirty_start(librados::ObjectReadOperation *op, bool block, 
+                             const std::string &id);
+int check_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty);
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id);

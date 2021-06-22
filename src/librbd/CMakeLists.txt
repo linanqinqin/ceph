@@ -80,6 +80,7 @@ set(librbd_internal_srcs
   exclusive_lock/StandardPolicy.cc
   image/AttachChildRequest.cc
   image/AttachParentRequest.cc
+  image/CheckDirtyRequest.cc
   image/CloneRequest.cc
   image/CloseRequest.cc
   image/CreateRequest.cc

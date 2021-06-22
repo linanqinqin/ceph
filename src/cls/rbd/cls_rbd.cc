@@ -45,7 +45,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 
 /* linanqinqin */
-#define LNQQ_DOUT_cls_rbd_LVL 100
+#define LNQQ_DOUT_cls_rbd_LVL 0
 /* end */
 
 using std::istringstream;
@@ -1124,16 +1124,25 @@ int get_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
  * Output:
  * @returns 0 on success, negative error code on failure
  */
+set<string> block_set;
 int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
   uint8_t dirty;
+  std::string image_id;
 
   // taking input
   auto iter = in->cbegin();
   try {
     decode(dirty, iter);
+    decode(image_id, iter);
   } catch (const ceph::buffer::error &err) {
     return -EINVAL;
+  }
+
+  // check if blocked
+  if (block_set.find(image_id)!=block_set.end()) {
+    CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dfork_dirty blocked");
+    return -EOPNOTSUPP;
   }
 
   // check that the dirty bit exists to make sure this is a header object
@@ -1157,6 +1166,48 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
     CLS_ERR("error writing snapshot metadata: %s", cpp_strerror(r).c_str());
     return r;
   }
+
+  return 0;
+}
+
+/**
+ * Input:
+ * @param block_on_clean indicate whether block dirty bit updates if clean
+ *
+ * Output:
+ * @param dirty_bit the dirty bit value of the image (uint8_t)
+ * @returns 0 on success, negative error code on failure
+ */
+int check_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  bool block_on_clean;
+  std::string image_id;
+
+  // taking input
+  auto iter = in->cbegin();
+  try {
+    decode(block_on_clean, iter);
+    if (block_on_clean) {
+      decode(image_id, iter);
+    }
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+
+  uint8_t dirty;
+  int r = read_key(hctx, "dfork_dirty", &dirty);
+  if (r < 0) {
+    CLS_ERR("failed to read the dirty bit off of disk: %s", cpp_strerror(r).c_str());
+    return r;
+  }
+
+  if (!dirty && block_on_clean) {
+    // add the image id to the block set
+    block_set.insert(image_id);
+    CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin blocking %s!!!", image_id.c_str());
+  }
+
+  encode(dirty, *out);
 
   return 0;
 }
@@ -8174,6 +8225,7 @@ CLS_INIT(rbd)
   /* linanqinqin */
   cls_method_handle_t h_get_dfork_dirty;
   cls_method_handle_t h_set_dfork_dirty;
+  cls_method_handle_t h_check_dfork_dirty;
   /* end */
   cls_method_handle_t h_get_parent;
   cls_method_handle_t h_set_parent;
@@ -8324,6 +8376,9 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "set_dfork_dirty",
         CLS_METHOD_RD | CLS_METHOD_WR,
         set_dfork_dirty, &h_set_dfork_dirty);
+  cls_register_cxx_method(h_class, "check_dfork_dirty",
+        CLS_METHOD_RD,
+        check_dfork_dirty, &h_check_dfork_dirty);
   /* end */
   cls_register_cxx_method(h_class, "get_snapcontext",
 			  CLS_METHOD_RD,

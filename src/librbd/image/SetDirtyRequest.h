@@ -21,9 +21,10 @@ namespace image {
 template <typename ImageCtxT = ImageCtx>
 class SetDirtyRequest {
 public:
-  static SetDirtyRequest *create(IoCtx &ioctx, const std::string &image_id, 
+  static SetDirtyRequest *create(IoCtx &ioctx, const std::string &image_name, 
+                                 const std::string &image_id, 
                                  uint8_t dirty, Context *on_finish) {
-    return new SetDirtyRequest(ioctx, image_id, dirty, on_finish);
+    return new SetDirtyRequest(ioctx, image_name, image_id, dirty, on_finish);
   }
 
   void send();
@@ -35,18 +36,27 @@ private:
    * @endverbatim
    */
 
-  SetDirtyRequest(IoCtx &ioctx, const std::string &image_id, uint8_t dirty, Context *on_finish);
+  SetDirtyRequest(IoCtx &ioctx, const std::string &image_name, 
+                  const std::string &image_id, uint8_t dirty, Context *on_finish);
 
   // ImageCtxT *m_image_ctx;
   IoCtx m_io_ctx;
+
+  std::string m_image_name;
   std::string m_image_id;
-  std::string m_header_obj;
-  
+
   uint8_t m_dirty;
 
   Context *m_on_finish;
+
+  std::string m_header_obj;
+  bufferlist m_out_bl;
+  
   CephContext *m_cct;
   int m_error_result;
+
+  void send_get_id();
+  void handle_get_id(int r);
 
   void send_set_dfork_dirty();
   void handle_set_dfork_dirty(int r);
