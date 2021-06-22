@@ -226,10 +226,17 @@ For creating a dfork-ed disk, there will be a intermediate snapshot named
 `foo-snap` associated with the parent image `foo`. There must *not* already be 
 an image/snapshot named `foo-snap` for dfork create to succeed.
 
-#### Dirty bit actions
+#### Check the dirty bit
 
-	rbd dfork dirty <image-id> --set|--clear    # set/clear the dirty bit
+	rbd dfork dirty foo 		# returns the dirty bit value of image foo
+	rbd dfork dirty foo --block-on-clean 	# block writes to foo if clean
 
-You must pass in the image id of the image, not the image name such as `foo`. 
-The id of an image can be found with `rbd info <image-name>` under the `id` 
-field in the output; You can also check the dirty bit value with this command.
+This API supports the abort-dfork() fault-tolerance approach, with the 
+`--block-on-clean` providing guarantee for atomic switchover. 
+
+#### Dirty bit actions (for internal use)
+
+	rbd dfork __dirty foo --set|--clear    # set/clear the dirty bit of foo
+
+Set or clear the dirty bit of a given image. This API is not supposed to 
+be exposed to clients but only for development use.
