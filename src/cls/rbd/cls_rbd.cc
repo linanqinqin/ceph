@@ -1129,13 +1129,12 @@ set<string> block_set;
 int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
   uint8_t dirty;
-  std::string image_id;
+  std::string image_id = cls_get_target_rbd_image_name(hctx);;
 
   // taking input
   auto iter = in->cbegin();
   try {
     decode(dirty, iter);
-    decode(image_id, iter);
   } catch (const ceph::buffer::error &err) {
     return -EINVAL;
   }
@@ -1144,9 +1143,11 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
 
   // check if blocked
   if (block_set.find(image_id)!=block_set.end()) {
+
     dfork_dirty_mtx.unlock();
+
     CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dfork_dirty blocked");
-    return -EOPNOTSUPP;
+    return -EPERM;
   }
 
   // check that the dirty bit exists to make sure this is a header object
@@ -1187,18 +1188,17 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
 int check_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
   bool block_on_clean;
-  std::string image_id;
+  std::string image_id = cls_get_target_rbd_image_name(hctx);
 
   // taking input
   auto iter = in->cbegin();
   try {
     decode(block_on_clean, iter);
-    if (block_on_clean) {
-      decode(image_id, iter);
-    }
   } catch (const ceph::buffer::error &err) {
     return -EINVAL;
   }
+
+  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin oid.name %s %d", image_id.c_str(), image_id.length());
 
   dfork_dirty_mtx.lock();
 
@@ -1218,6 +1218,24 @@ int check_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out
   dfork_dirty_mtx.unlock();
 
   encode(dirty, *out);
+
+  return 0;
+}
+
+/**
+ * Input:
+ * none
+ *
+ * Output:
+ * @returns 0 on success, negative error code on failure
+ */
+int unblock_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  std::string image_id = cls_get_target_rbd_image_name(hctx);
+
+  dfork_dirty_mtx.lock();
+  block_set.erase(image_id);
+  dfork_dirty_mtx.unlock();
 
   return 0;
 }
@@ -8236,6 +8254,7 @@ CLS_INIT(rbd)
   cls_method_handle_t h_get_dfork_dirty;
   cls_method_handle_t h_set_dfork_dirty;
   cls_method_handle_t h_check_dfork_dirty;
+  cls_method_handle_t h_unblock_dfork_dirty;
   /* end */
   cls_method_handle_t h_get_parent;
   cls_method_handle_t h_set_parent;
@@ -8389,6 +8408,9 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "check_dfork_dirty",
         CLS_METHOD_RD,
         check_dfork_dirty, &h_check_dfork_dirty);
+  cls_register_cxx_method(h_class, "unblock_dfork_dirty",
+        CLS_METHOD_WR,
+        unblock_dfork_dirty, &h_unblock_dfork_dirty);
   /* end */
   cls_register_cxx_method(h_class, "get_snapcontext",
 			  CLS_METHOD_RD,

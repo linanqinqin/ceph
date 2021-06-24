@@ -45,8 +45,9 @@
 #include "librbd/image/CreateRequest.h"
 #include "librbd/image/GetMetadataRequest.h"
 /* linanqinqin */
-#include "librbd/image/SetDirtyRequest.h"
 #include "librbd/image/CheckDirtyRequest.h"
+#include "librbd/image/SetDirtyRequest.h"
+#include "librbd/image/UnblockDirtyRequest.h"
 /* end */
 #include "librbd/image/Types.h"
 #include "librbd/io/AioCompletion.h"
@@ -924,6 +925,18 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
   //   return r;
   // }
+
+  int unblock_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 
+                          const std::string &image_id) {
+
+    C_SaferCond cond;
+    image::UnblockDirtyRequest<> *req = image::UnblockDirtyRequest<>::create(
+                                        io_ctx, image_name, image_id, &cond);
+    req->send();
+    int r = cond.wait();
+
+    return r;
+  }
   /* end */
 
   int get_features(ImageCtx *ictx, uint64_t *features)

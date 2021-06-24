@@ -90,6 +90,8 @@ namespace librbd {
   int check_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 
                         const std::string &image_id, 
                         uint8_t *dirty, bool block);
+  int unblock_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 
+                          const std::string &image_id);
   /* end */
   int get_features(ImageCtx *ictx, uint64_t *features);
   int get_overlap(ImageCtx *ictx, uint64_t *overlap);

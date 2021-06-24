@@ -260,6 +260,7 @@ public:
   //                       const char *id, bool block);
   int check_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id, 
                         uint8_t *dirty, bool block);
+  int unblock_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id);
   /* end */
   int aio_open(IoCtx& io_ctx, Image& image, const char *name,
 	       const char *snapname, RBD::AioCompletion *c);

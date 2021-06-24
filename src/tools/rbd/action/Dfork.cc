@@ -179,6 +179,27 @@ static int do_check_dfork_dirty(const std::string &pool_name,
 //   return 0;
 // }
 
+static int do_unblock_dfork_dirty(const std::string &pool_name, 
+                                  const std::string &namespace_name, 
+                                  const std::string &image_name,
+                                  const std::string &image_id) {
+  librados::Rados rados; 
+  librados::IoCtx io_ctx;
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = rbd.unblock_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str());
+  if (r < 0) {
+    std::cerr << "rbd: error unblocking dfork dirty updates: "
+              << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
 void get_create_arguments(po::options_description *positional,
                           po::options_description *options) {
   at::add_snap_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
@@ -561,7 +582,9 @@ void get_check_dirty_arguments(po::options_description *positional,
                                      at::ARGUMENT_MODIFIER_NONE);
   at::add_image_id_option(options);
   options->add_options()
-    ("block-on-clean", po::bool_switch(), "block writes if the dirty bit is clean");
+    ("block-on-clean", po::bool_switch(), "block dirty bit updates if the dirty bit is clean");
+  options->add_options()
+    ("unblock", po::bool_switch(), "unblock dirty bit updates");
 }
 
 int execute_check_dirty(const po::variables_map &vm,
@@ -573,6 +596,7 @@ int execute_check_dirty(const po::variables_map &vm,
   std::string snap_name;
   std::string image_id;
   bool block_on_clean;
+  bool unblock;
 
   if (vm.count(at::IMAGE_ID)) {
     image_id = vm[at::IMAGE_ID].as<std::string>();
@@ -598,15 +622,34 @@ int execute_check_dirty(const po::variables_map &vm,
   }
 
   block_on_clean = vm["block-on-clean"].as<bool>();
-
-  uint8_t dirty;
-  r = do_check_dfork_dirty(pool_name, namespace_name, image_name, image_id,
-                           &dirty, block_on_clean);
-  if (r < 0) {
-    std::cerr << "rbd: failed to check dfork dirty: " << cpp_strerror(r) << std::endl;
-    return -r;
+  unblock = vm["unblock"].as<bool>();
+  if (block_on_clean && unblock) {
+    std::cerr << "rbd: both block and unblock actions specified. "
+              << std::endl;
+    return -EINVAL;
   }
-  std::cout << (int)dirty << std::endl;
+
+  if (unblock) {
+
+    r = do_unblock_dfork_dirty(pool_name, namespace_name, image_name, image_id);
+    if (r < 0) {
+      std::cerr << "rbd: failed to unblock dfork dirty: " << cpp_strerror(r) 
+                << std::endl;
+      return -r;
+    }
+  }
+  else {
+
+    uint8_t dirty;
+    r = do_check_dfork_dirty(pool_name, namespace_name, image_name, image_id,
+                             &dirty, block_on_clean);
+    if (r < 0) {
+      std::cerr << "rbd: failed to check dfork dirty: " << cpp_strerror(r) 
+                << std::endl;
+      return -r;
+    }
+    std::cout << (int)dirty << std::endl;
+  }
 
   // librbd::Image image;
   // r = do_check_dfork_dirty(&image, pool_name, namespace_name, image_name, image_id,

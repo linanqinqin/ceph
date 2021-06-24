@@ -342,38 +342,38 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
 }
 
 /* linanqinqin */
-template <typename I>
-void OpenRequest<I>::send_set_dfork_dirty() {
-  CephContext *cct = m_image_ctx->cct;
-  // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << dendl;
+// template <typename I>
+// void OpenRequest<I>::send_set_dfork_dirty() {
+//   CephContext *cct = m_image_ctx->cct;
+//   // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << dendl;
 
-  librados::ObjectWriteOperation op;
-  cls_client::set_dfork_dirty(&op, 17, m_image_ctx->id);
+//   librados::ObjectWriteOperation op;
+//   cls_client::set_dfork_dirty(&op, 17);
 
-  using klass = OpenRequest<I>;
-  librados::AioCompletion *comp =
-    create_rados_callback<klass, &klass::handle_set_dfork_dirty>(this);
-  /* linanqinqin */
-  ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ": " << m_image_ctx->header_oid << dendl;
-  /* end */
-  int r = m_image_ctx->md_ctx.aio_operate(m_image_ctx->header_oid, comp, &op);
-  ceph_assert(r == 0);
-  comp->release();
-}
+//   using klass = OpenRequest<I>;
+//   librados::AioCompletion *comp =
+//     create_rados_callback<klass, &klass::handle_set_dfork_dirty>(this);
+//   /* linanqinqin */
+//   ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ": " << m_image_ctx->header_oid << dendl;
+//   /* end */
+//   int r = m_image_ctx->md_ctx.aio_operate(m_image_ctx->header_oid, comp, &op);
+//   ceph_assert(r == 0);
+//   comp->release();
+// }
 
-template <typename I>
-Context *OpenRequest<I>::handle_set_dfork_dirty(int *result) {
-  CephContext *cct = m_image_ctx->cct;
-  ldout(cct, 10) << __func__ << ": r=" << *result << dendl;
-  // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ": r=" << *result << dendl;
+// template <typename I>
+// Context *OpenRequest<I>::handle_set_dfork_dirty(int *result) {
+//   CephContext *cct = m_image_ctx->cct;
+//   ldout(cct, 10) << __func__ << ": r=" << *result << dendl;
+//   // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ": r=" << *result << dendl;
 
-  if (*result < 0) {
-    lderr(cct) << "set_dfork_dirty failed: " << cpp_strerror(*result)
-         << dendl;
-  }
+//   if (*result < 0) {
+//     lderr(cct) << "set_dfork_dirty failed: " << cpp_strerror(*result)
+//          << dendl;
+//   }
 
-  return nullptr;
-}
+//   return nullptr;
+// }
 /* end */
 
 template <typename I>

@@ -231,21 +231,16 @@ int get_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
   return 0;
 }
 
-void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty, 
-                     const std::string &id) {
+void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty) {
   bufferlist bl;
   encode(dirty, bl);
-  encode(id, bl);
   op->exec("rbd", "set_dfork_dirty", bl);
 }
 
-void check_dfork_dirty_start(librados::ObjectReadOperation *op, bool block, 
-                             const std::string &id) {
+void check_dfork_dirty_start(librados::ObjectReadOperation *op, bool block) {
+
   bufferlist bl;
   encode(block, bl);
-  if (block) {
-    encode(id, bl);
-  }
   op->exec("rbd", "check_dfork_dirty", bl);
 }
 
@@ -256,6 +251,11 @@ int check_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
     return -EBADMSG;
   }
   return 0;
+}
+
+void unblock_dfork_dirty(librados::ObjectWriteOperation *op) {
+  bufferlist bl;
+  op->exec("rbd", "unblock_dfork_dirty", bl);
 }
 /* end */
 

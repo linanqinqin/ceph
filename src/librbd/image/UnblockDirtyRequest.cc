@@ -1,7 +1,7 @@
 // -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
 // vim: ts=8 sw=2 smarttab
 
-#include "librbd/image/SetDirtyRequest.h"
+#include "librbd/image/UnblockDirtyRequest.h"
 #include "common/dout.h"
 #include "common/errno.h"
 #include "cls/rbd/cls_rbd_client.h"
@@ -9,10 +9,10 @@
 
 #define dout_subsys ceph_subsys_rbd
 #undef dout_prefix
-#define dout_prefix *_dout << "librbd::image::SetDirtyRequest: "
+#define dout_prefix *_dout << "librbd::image::UnblockDirtyRequest: "
 
 /* linanqinqin */
-#define LNQQ_DOUT_SetDirtyReq_LVL 0
+#define LNQQ_DOUT_CheckDirtyReq_LVL 0
 /* end */
 
 namespace librbd {
@@ -22,11 +22,12 @@ namespace image {
 using util::create_rados_callback;
 
 template <typename I>
-SetDirtyRequest<I>::SetDirtyRequest(IoCtx &ioctx, const std::string &image_name, 
-                                    const std::string &image_id, 
-                                    uint8_t dirty, Context *on_finish)
-  : m_image_name(image_name), m_image_id(image_id), 
-    m_dirty(dirty),
+UnblockDirtyRequest<I>::UnblockDirtyRequest(IoCtx &ioctx, 
+                                            const std::string &image_name, 
+                                            const std::string &image_id,
+                                            Context *on_finish)
+  : m_image_name(image_name), 
+    m_image_id(image_id), 
     m_on_finish(on_finish), m_error_result(0) {
 
   m_io_ctx.dup(ioctx);
@@ -34,9 +35,9 @@ SetDirtyRequest<I>::SetDirtyRequest(IoCtx &ioctx, const std::string &image_name,
 }
 
 template <typename I>
-void SetDirtyRequest<I>::send() {
+void UnblockDirtyRequest<I>::send() {
   if (!m_image_id.empty()) {
-    send_set_dfork_dirty();
+    send_unblock_dfork_dirty();
   }
   else if (!m_image_name.empty()) {
     send_get_id();
@@ -47,12 +48,12 @@ void SetDirtyRequest<I>::send() {
 }
 
 template <typename I>
-void SetDirtyRequest<I>::send_get_id() {
+void UnblockDirtyRequest<I>::send_get_id() {
 
   librados::ObjectReadOperation op;
   cls_client::get_id_start(&op);
 
-  using klass = SetDirtyRequest<I>;
+  using klass = UnblockDirtyRequest<I>;
   librados::AioCompletion *comp =
     create_rados_callback<klass, &klass::handle_get_id>(this);
   
@@ -64,7 +65,7 @@ void SetDirtyRequest<I>::send_get_id() {
 }
 
 template <typename I>
-void SetDirtyRequest<I>::handle_get_id(int r) {
+void UnblockDirtyRequest<I>::handle_get_id(int r) {
 
   if (r == 0) {
     auto it = m_out_bl.cbegin();
@@ -77,53 +78,36 @@ void SetDirtyRequest<I>::handle_get_id(int r) {
     complete(r);
   }
   else {
-    send_set_dfork_dirty();
+    send_unblock_dfork_dirty();
   }
 }
 
 template <typename I>
-void SetDirtyRequest<I>::send_set_dfork_dirty() {
-  // CephContext *cct = m_image_ctx->cct;
-  ldout(m_cct, LNQQ_DOUT_SetDirtyReq_LVL) << __func__ << dendl;
+void UnblockDirtyRequest<I>::send_unblock_dfork_dirty() {
+  ldout(m_cct, LNQQ_DOUT_CheckDirtyReq_LVL) << __func__ << dendl;
 
   librados::ObjectWriteOperation op;
-  cls_client::set_dfork_dirty(&op, m_dirty);
+  cls_client::unblock_dfork_dirty(&op);
 
-  using klass = SetDirtyRequest<I>;
+  using klass = UnblockDirtyRequest<I>;
   librados::AioCompletion *comp =
-    create_rados_callback<klass, &klass::handle_set_dfork_dirty>(this);
-  /* linanqinqin */
-  // ldout(cct, LNQQ_DOUT_SetDirtyReq_LVL) << __func__ << ": " << m_header_oid << dendl;
-  /* end */
-
+    create_rados_callback<klass, &klass::handle_unblock_dfork_dirty>(this);
+  
   m_header_obj = util::header_name(m_image_id);
-  m_out_bl.clear();
   int r = m_io_ctx.aio_operate(m_header_obj, comp, &op);
   ceph_assert(r == 0);
   comp->release();
 }
 
 template <typename I>
-void SetDirtyRequest<I>::handle_set_dfork_dirty(int r) {
-  // CephContext *cct = m_image_ctx->cct;
-  // ldout(cct, 10) << __func__ << ": r=" << r << dendl;
-  ldout(m_cct, LNQQ_DOUT_SetDirtyReq_LVL) << __func__ << ": r=" << r << dendl;
-
-  // if (r == 0) {
-  //   auto it = m_out_bl.cbegin();
-  //   try {
-  //     decode(r, it);
-  //   } catch (const ceph::buffer::error &err) {
-  //     r = -EBADMSG;
-  //   }
-  // }
+void UnblockDirtyRequest<I>::handle_unblock_dfork_dirty(int r) {
+  ldout(m_cct, 10) << __func__ << ": r=" << r << dendl;
 
   if (r < 0) {
-    lderr(m_cct) << "set_dfork_dirty failed: " << cpp_strerror(r)
-               << dendl;
-    // m_error_result = r;
-    // complete(m_error_result);
-    complete(r);
+    lderr(m_cct) << "unblock_dfork_dirty failed: " << cpp_strerror(r)
+                 << dendl;
+    m_error_result = r;
+    complete(m_error_result);
   }
   else {
     complete(0);
@@ -131,7 +115,7 @@ void SetDirtyRequest<I>::handle_set_dfork_dirty(int r) {
 }
 
 template <typename I>
-void SetDirtyRequest<I>::complete(int r) {
+void UnblockDirtyRequest<I>::complete(int r) {
 
   auto on_finish = m_on_finish;
   delete this;
@@ -141,4 +125,4 @@ void SetDirtyRequest<I>::complete(int r) {
 } // namespace image
 } // namespace librbd
 
-template class librbd::image::SetDirtyRequest<librbd::ImageCtx>;
+template class librbd::image::UnblockDirtyRequest<librbd::ImageCtx>;

@@ -559,6 +559,12 @@ namespace librbd {
   //   ldout((CephContext *)io_ctx.cct(), LNQQ_DOUT_librbd_LVL) << this << " " << __func__ << dendl;
   //   return 0;
   // }
+
+  int RBD::unblock_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id) {
+
+    int r = librbd::unblock_dfork_dirty(io_ctx, name, id);
+    return r;
+  }
   /* end */
 
   int RBD::aio_open(IoCtx& io_ctx, Image& image, const char *name,

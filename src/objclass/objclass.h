@@ -48,6 +48,11 @@ extern int cls_setxattr(cls_method_context_t hctx, const char *name,
 extern int cls_get_request_origin(cls_method_context_t hctx,
                                   entity_inst_t *origin);
 
+/* linanqinqin */
+std::string cls_get_target_oid_name(cls_method_context_t hctx);
+std::string cls_get_target_rbd_image_name(cls_method_context_t hctx);
+/* end */
+
 /* class registration api */
 extern int cls_unregister(cls_handle_t);
 

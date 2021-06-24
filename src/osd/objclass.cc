@@ -17,6 +17,14 @@
 
 #define dout_context ClassHandler::get_instance().cct
 
+/* linanqinqin */
+#define dout_subsys ceph_subsys_osd
+#undef dout_prefix
+#define dout_prefix *_dout
+
+#define LNQQ_DOUT_objclass_LVL 0
+/* end */
+
 using std::map;
 using std::set;
 using std::string;
@@ -127,6 +135,21 @@ int cls_get_request_origin(cls_method_context_t hctx, entity_inst_t *origin)
   return 0;
 }
 
+/* linanqinqin */
+std::string cls_get_target_oid_name(cls_method_context_t hctx) {
+  PrimaryLogPG::OpContext **pctx = static_cast<PrimaryLogPG::OpContext **>(hctx);
+  return (*pctx)->new_obs.oi.soid.oid.name;
+}
+
+std::string cls_get_target_rbd_image_name(cls_method_context_t hctx) {
+  PrimaryLogPG::OpContext **pctx = static_cast<PrimaryLogPG::OpContext **>(hctx);
+  const std::string oname = (*pctx)->new_obs.oi.soid.oid.name;
+
+  int fpos = oname.find('.');
+  return oname.substr(fpos+1, oname.length()-fpos);
+}
+/* end */
+
 int cls_cxx_create(cls_method_context_t hctx, bool exclusive)
 {
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
@@ -214,6 +237,9 @@ int cls_cxx_read2(cls_method_context_t hctx, int ofs, int len,
 int cls_cxx_write2(cls_method_context_t hctx, int ofs, int len,
                    bufferlist *inbl, uint32_t op_flags)
 {
+  /* linanqinqin */
+  ldout(dout_context, LNQQ_DOUT_objclass_LVL) << "linanqinqin: " << __func__ << dendl;
+  /* end */
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
   vector<OSDOp> ops(1);
   ops[0].op.op = CEPH_OSD_OP_WRITE;
@@ -226,6 +252,9 @@ int cls_cxx_write2(cls_method_context_t hctx, int ofs, int len,
 
 int cls_cxx_write_full(cls_method_context_t hctx, bufferlist *inbl)
 {
+  /* linanqinqin */
+  ldout(dout_context, LNQQ_DOUT_objclass_LVL) << "linanqinqin: " << __func__ << dendl;
+  /* end */
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
   vector<OSDOp> ops(1);
   ops[0].op.op = CEPH_OSD_OP_WRITEFULL;
@@ -237,6 +266,9 @@ int cls_cxx_write_full(cls_method_context_t hctx, bufferlist *inbl)
 
 int cls_cxx_replace(cls_method_context_t hctx, int ofs, int len, bufferlist *inbl)
 {
+  /* linanqinqin */
+  ldout(dout_context, LNQQ_DOUT_objclass_LVL) << "linanqinqin: " << __func__ << dendl;
+  /* end */
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
   vector<OSDOp> ops(2);
   ops[0].op.op = CEPH_OSD_OP_TRUNCATE;
@@ -251,6 +283,9 @@ int cls_cxx_replace(cls_method_context_t hctx, int ofs, int len, bufferlist *inb
 
 int cls_cxx_truncate(cls_method_context_t hctx, int ofs)
 {
+  /* linanqinqin */
+  ldout(dout_context, LNQQ_DOUT_objclass_LVL) << "linanqinqin: " << __func__ << dendl;
+  /* end */
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
   vector<OSDOp> ops(1);
   ops[0].op.op = CEPH_OSD_OP_TRUNCATE;
@@ -261,6 +296,9 @@ int cls_cxx_truncate(cls_method_context_t hctx, int ofs)
 
 int cls_cxx_write_zero(cls_method_context_t hctx, int ofs, int len)
 {
+  /* linanqinqin */
+  ldout(dout_context, LNQQ_DOUT_objclass_LVL) << "linanqinqin: " << __func__ << dendl;
+  /* end */
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
   vector<OSDOp> ops(1);
   ops[0].op.op = CEPH_OSD_OP_ZERO;
@@ -518,6 +556,11 @@ int cls_cxx_map_set_val(cls_method_context_t hctx, const string &key,
 int cls_cxx_map_set_vals(cls_method_context_t hctx,
 			 const std::map<string, bufferlist> *map)
 {
+  /* linanqinqin */
+  // if (map->count("dfork_dirty")) {
+  //   ldout(dout_context, LNQQ_DOUT_objclass_LVL) << "linanqinqin: " << __func__ << dendl;
+  // }
+  /* end */
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
   vector<OSDOp> ops(1);
   OSDOp& op = ops[0];
@@ -660,6 +703,9 @@ int cls_cxx_chunk_write_and_set(cls_method_context_t hctx, int ofs, int len,
 				bufferlist *write_inbl, uint32_t op_flags,
 				bufferlist *set_inbl, int set_len)
 {
+  /* linanqinqin */
+  ldout(dout_context, LNQQ_DOUT_objclass_LVL) << "linanqinqin: " << __func__ << dendl;
+  /* end */
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
   char cname[] = "cas";
   char method[] = "chunk_set";

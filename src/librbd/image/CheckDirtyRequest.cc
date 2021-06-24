@@ -88,7 +88,7 @@ void CheckDirtyRequest<I>::send_check_dfork_dirty() {
   ldout(m_cct, LNQQ_DOUT_CheckDirtyReq_LVL) << __func__ << dendl;
 
   librados::ObjectReadOperation op;
-  cls_client::check_dfork_dirty_start(&op, m_block_on_clean, m_image_id);
+  cls_client::check_dfork_dirty_start(&op, m_block_on_clean);
 
   using klass = CheckDirtyRequest<I>;
   librados::AioCompletion *comp =
@@ -120,8 +120,9 @@ void CheckDirtyRequest<I>::handle_check_dfork_dirty(int r) {
     m_error_result = r;
     complete(m_error_result);
   }
-
-  complete(0);
+  else {
+    complete(0);
+  }
 }
 
 template <typename I>
