@@ -48,6 +48,7 @@
 #include "librbd/image/CheckDirtyRequest.h"
 #include "librbd/image/SetDirtyRequest.h"
 #include "librbd/image/UnblockDirtyRequest.h"
+#include "librbd/image/ResetDirtyRequest.h"
 /* end */
 #include "librbd/image/Types.h"
 #include "librbd/io/AioCompletion.h"
@@ -880,11 +881,13 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
   /* linanqinqin */
   int set_dfork_dirty(IoCtx& io_ctx, const std::string &image_name,
-                      const std::string &image_id, uint8_t dirty) {
+                      const std::string &image_id, uint8_t dirty, 
+                      const std::string &location_oid) {
 
     C_SaferCond cond;
     image::SetDirtyRequest<> *req = image::SetDirtyRequest<>::create(
-                                    io_ctx, image_name, image_id, dirty, &cond);
+                                    io_ctx, image_name, image_id, 
+                                    dirty, location_oid, &cond);
     req->send();
     int r = cond.wait();
 
@@ -932,6 +935,18 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     C_SaferCond cond;
     image::UnblockDirtyRequest<> *req = image::UnblockDirtyRequest<>::create(
                                         io_ctx, image_name, image_id, &cond);
+    req->send();
+    int r = cond.wait();
+
+    return r;
+  }
+
+  int reset_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 
+                        const std::string &image_id) {
+
+    C_SaferCond cond;
+    image::ResetDirtyRequest<> *req = image::ResetDirtyRequest<>::create(
+                                      io_ctx, image_name, image_id, &cond);
     req->send();
     int r = cond.wait();
 

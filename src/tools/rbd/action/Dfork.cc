@@ -109,11 +109,12 @@ int do_remove_snap(librbd::Image& image, const char *snapname, bool force,
   return 0;
 }
 
-static int do_set_dfork_dirty_by_id(const std::string &pool_name, 
-                                    const std::string &namespace_name, 
-                                    const std::string &image_name,
-                                    const std::string &image_id,
-                                    uint8_t dirty) {
+static int do_set_dfork_dirty(const std::string &pool_name, 
+                              const std::string &namespace_name, 
+                              const std::string &image_name,
+                              const std::string &image_id,
+                              uint8_t dirty, 
+                              const std::string &location_oid) {
   librados::Rados rados; 
   librados::IoCtx io_ctx;
   int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
@@ -122,7 +123,8 @@ static int do_set_dfork_dirty_by_id(const std::string &pool_name,
   }
 
   librbd::RBD rbd;
-  r = rbd.set_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str(), dirty);
+  r = rbd.set_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str(), 
+                          dirty, location_oid.c_str());
   if (r < 0) {
     std::cerr << "rbd: error setting the dfork dirty bit: "
               << cpp_strerror(r) << std::endl;
@@ -200,6 +202,27 @@ static int do_unblock_dfork_dirty(const std::string &pool_name,
   return 0;
 }
 
+static int do_reset_dfork_dirty(const std::string &pool_name, 
+                                const std::string &namespace_name, 
+                                const std::string &image_name,
+                                const std::string &image_id) {
+  librados::Rados rados;
+  librados::IoCtx io_ctx;
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = rbd.reset_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str());
+  if (r < 0) {
+    std::cerr << "rbd: error resetting dfork dirty: "
+              << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
 void get_create_arguments(po::options_description *positional,
                           po::options_description *options) {
   at::add_snap_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
@@ -269,9 +292,10 @@ int execute_create(const po::variables_map &vm,
   if (r < 0)
     return r;
   if (dirty) {
-    r = do_set_dfork_dirty_by_id(pool_name, namespace_name, image_name, image_id, 0);
+    r = do_reset_dfork_dirty(pool_name.c_str(), namespace_name.c_str(), 
+                             image_name.c_str(), image_id.c_str());
     if (r < 0) {
-      std::cerr << "rbd: set dfork dirty error: " << cpp_strerror(r) << std::endl;
+      std::cerr << "rbd: reset dfork dirty error: " << cpp_strerror(r) << std::endl;
       return -r;
     }
   }
@@ -513,6 +537,11 @@ void get_set_dirty_arguments(po::options_description *positional,
     ("set", po::bool_switch(), "set the dirty bit");
   options->add_options()
     ("clear", po::bool_switch(), "clear the dirty bit");
+  options->add_options()
+    ("reset", po::bool_switch(), "reset the dirty bit");
+
+  options->add_options()
+    ("loc-oid", po::value<std::string>(), "the oid associated with the sender");
 }
 
 int execute_set_dirty(const po::variables_map &vm,
@@ -523,7 +552,7 @@ int execute_set_dirty(const po::variables_map &vm,
   std::string image_name;
   std::string snap_name;
   std::string image_id;
-  bool is_set, is_clear;
+  bool is_set, is_clear, is_reset;
 
   // deprecated
   // int r = utils::get_pool_image_id(vm, &arg_index, &pool_name, &namespace_name,
@@ -557,23 +586,32 @@ int execute_set_dirty(const po::variables_map &vm,
 
   is_set = vm["set"].as<bool>();
   is_clear = vm["clear"].as<bool>();
-  if (!is_set && !is_clear) {
-    std::cerr << "rbd: no set/clear action specified" << std::endl;
+  is_reset = vm["reset"].as<bool>();
+  if (!is_set && !is_clear && !is_reset) {
+    std::cerr << "rbd: no set/clear/reset action specified" << std::endl;
     return -EINVAL;
   }
-  if (is_set && is_clear) {
-    std::cerr << "rbd: both set and clear actions specified" << std::endl;
+  if (is_set+is_clear+is_reset > 1) {
+    std::cerr << "rbd: more than one action (set/clear/reset) specified" << std::endl;
     return -EINVAL;
   }
 
-  r = do_set_dfork_dirty_by_id(pool_name, namespace_name, image_name, image_id, 
-                               is_set?1:0);
-  if (r < 0) {
-    std::cerr << "rbd: set dfork dirty error: " << cpp_strerror(r) << std::endl;
-    return -r;
+  if (is_reset) {
+    r = do_reset_dfork_dirty(pool_name.c_str(), namespace_name.c_str(), 
+                             image_name.c_str(), image_id.c_str());
+  }
+  else {
+    std::string location_oid;
+    if (vm.count("loc-oid")) {
+      location_oid = vm["loc-oid"].as<std::string>();
+    }
+
+    r = do_set_dfork_dirty(pool_name.c_str(), namespace_name.c_str(), 
+                           image_name.c_str(), image_id.c_str(), 
+                           is_set?1:0, location_oid);
   }
 
-  return 0;
+  return r;
 }
 
 void get_check_dirty_arguments(po::options_description *positional,

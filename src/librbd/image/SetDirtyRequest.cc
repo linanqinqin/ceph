@@ -24,9 +24,13 @@ using util::create_rados_callback;
 template <typename I>
 SetDirtyRequest<I>::SetDirtyRequest(IoCtx &ioctx, const std::string &image_name, 
                                     const std::string &image_id, 
-                                    uint8_t dirty, Context *on_finish)
-  : m_image_name(image_name), m_image_id(image_id), 
+                                    uint8_t dirty, 
+                                    const std::string &location_oid, 
+                                    Context *on_finish)
+  : m_image_name(image_name), 
+    m_image_id(image_id), 
     m_dirty(dirty),
+    m_location_oid(location_oid),
     m_on_finish(on_finish), m_error_result(0) {
 
   m_io_ctx.dup(ioctx);
@@ -87,7 +91,7 @@ void SetDirtyRequest<I>::send_set_dfork_dirty() {
   ldout(m_cct, LNQQ_DOUT_SetDirtyReq_LVL) << __func__ << dendl;
 
   librados::ObjectWriteOperation op;
-  cls_client::set_dfork_dirty(&op, m_dirty);
+  cls_client::set_dfork_dirty(&op, m_dirty, m_location_oid);
 
   using klass = SetDirtyRequest<I>;
   librados::AioCompletion *comp =
@@ -97,7 +101,7 @@ void SetDirtyRequest<I>::send_set_dfork_dirty() {
   /* end */
 
   m_header_obj = util::header_name(m_image_id);
-  m_out_bl.clear();
+  // m_out_bl.clear();
   int r = m_io_ctx.aio_operate(m_header_obj, comp, &op);
   ceph_assert(r == 0);
   comp->release();
@@ -120,10 +124,9 @@ void SetDirtyRequest<I>::handle_set_dfork_dirty(int r) {
 
   if (r < 0) {
     lderr(m_cct) << "set_dfork_dirty failed: " << cpp_strerror(r)
-               << dendl;
-    // m_error_result = r;
-    // complete(m_error_result);
-    complete(r);
+                 << dendl;
+    m_error_result = r;
+    complete(m_error_result);
   }
   else {
     complete(0);

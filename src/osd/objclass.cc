@@ -22,7 +22,7 @@
 #undef dout_prefix
 #define dout_prefix *_dout
 
-#define LNQQ_DOUT_objclass_LVL 0
+#define LNQQ_DOUT_objclass_LVL 100
 /* end */
 
 using std::map;
@@ -145,8 +145,14 @@ std::string cls_get_target_rbd_image_name(cls_method_context_t hctx) {
   PrimaryLogPG::OpContext **pctx = static_cast<PrimaryLogPG::OpContext **>(hctx);
   const std::string oname = (*pctx)->new_obs.oi.soid.oid.name;
 
-  int fpos = oname.find('.');
-  return oname.substr(fpos+1, oname.length()-fpos);
+  size_t fpos = oname.find('.');
+  size_t fend = oname.find('.', fpos+1);
+  if (fend == std::string::npos) {
+    return oname.substr(fpos+1, oname.length()-fpos);
+  }
+  else {
+    return oname.substr(fpos+1, fend-fpos-1);
+  }
 }
 /* end */
 

@@ -23,8 +23,11 @@ class SetDirtyRequest {
 public:
   static SetDirtyRequest *create(IoCtx &ioctx, const std::string &image_name, 
                                  const std::string &image_id, 
-                                 uint8_t dirty, Context *on_finish) {
-    return new SetDirtyRequest(ioctx, image_name, image_id, dirty, on_finish);
+                                 uint8_t dirty, 
+                                 const std::string &location_oid, 
+                                 Context *on_finish) {
+    return new SetDirtyRequest(ioctx, image_name, image_id, 
+                               dirty, location_oid, on_finish);
   }
 
   void send();
@@ -37,7 +40,10 @@ private:
    */
 
   SetDirtyRequest(IoCtx &ioctx, const std::string &image_name, 
-                  const std::string &image_id, uint8_t dirty, Context *on_finish);
+                  const std::string &image_id, 
+                  uint8_t dirty, 
+                  const std::string &location_oid, 
+                  Context *on_finish);
 
   // ImageCtxT *m_image_ctx;
   IoCtx m_io_ctx;
@@ -46,6 +52,7 @@ private:
   std::string m_image_id;
 
   uint8_t m_dirty;
+  std::string m_location_oid;
 
   Context *m_on_finish;
 

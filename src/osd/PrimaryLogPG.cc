@@ -56,6 +56,11 @@
 #include "include/ceph_assert.h"  // json_spirit clobbers it
 #include "include/rados/rados_types.hpp"
 
+/* linanqinqin */
+// #include "include/rados/librados.hpp"
+// #include "include/rbd/librbd.hpp"
+/* end */
+
 #ifdef WITH_LTTNG
 #include "tracing/osd.h"
 #else
@@ -67,6 +72,10 @@
 #define DOUT_PREFIX_ARGS this, osd->whoami, get_osdmap()
 #undef dout_prefix
 #define dout_prefix _prefix(_dout, this)
+
+/* linanqinqin */
+#define LNQQ_DOUT_PrimaryLogPG_LVL 0
+/* end */
 
 #include <sstream>
 #include <utility>
@@ -108,6 +117,90 @@ template <typename T>
 static ostream& _prefix(std::ostream *_dout, T *pg) {
   return pg->gen_prefix(*_dout);
 }
+
+/* linanqinqin */
+string get_image_id(const hobject_t& soid_) {
+  string _oid = soid_.oid.name;
+  constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
+  if (_oid.compare(0, len_prefix, RBD_DATA_PREFIX)!=0) {
+    return string();
+  }
+  return _oid.substr(len_prefix, _oid.find(".", len_prefix)-len_prefix);
+}
+
+// using map
+// map<string, uint8_t> dfork_dirty_map;
+// bool set_dfork_dirty(const hobject_t& soid_) {
+//   string _oid = soid_.oid.name;
+//   if (_oid.compare(0, len_prefix, RBD_DATA_PREFIX)!=0) {
+//     return false;
+//   }
+  
+//   string img_id = _oid.substr(len_prefix, _oid.find(".", len_prefix)-len_prefix);
+//   map<string, uint8_t>::iterator it = dfork_dirty_map.find(img_id);
+//   if (it!=dfork_dirty_map.end()) {
+//     it->second ++;
+//   }
+//   else {
+//     dfork_dirty_map.insert(pair<string, uint8_t>(img_id, 0));
+//   }
+//   return true;
+// }
+
+// using set
+set<string> dfork_dirty_set;
+std::mutex dfork_dirty_set_mtx;
+bool set_dfork_dirty(const hobject_t& soid_) {
+  std::string _oid = soid_.oid.name;
+  constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
+
+  if (_oid.compare(0, len_prefix, RBD_DATA_PREFIX)!=0) {
+    // not a target
+    return true;
+  }
+  
+  std::string img_id = _oid.substr(len_prefix, _oid.find('.', len_prefix)-len_prefix);
+  if (dfork_dirty_set.find(img_id)!=dfork_dirty_set.end()) {
+    // already dirty
+    return true;
+  }
+  else {
+    // clean
+
+    // acquiring the lock
+    dfork_dirty_set_mtx.lock();
+
+    // check again
+    if (dfork_dirty_set.find(img_id)!=dfork_dirty_set.end()) {
+      dfork_dirty_set_mtx.unlock();
+      return true;
+    }
+
+    // using the dumbest way: calling a shell command
+    std::string obj_offset = _oid.substr(len_prefix+img_id.length()+1);
+    std::string rbd_cmd = "/mnt/ceph/build/bin/rbd dfork __dirty -c /mnt/ceph/build/ceph.conf --image-id=" 
+                          + img_id + " --loc-oid=" 
+                          + obj_offset + " --set &>/dev/null";
+
+    int r = std::system(rbd_cmd.c_str());
+    if (WEXITSTATUS(r)) {
+      dfork_dirty_set_mtx.unlock();
+      return false;
+    }
+    else {
+      // putting the image id in the local cache
+      dfork_dirty_set.insert(img_id);
+
+      dfork_dirty_set_mtx.unlock();
+      return true;
+    }
+  }
+}
+
+void unset_dfork_dirty(const hobject_t& soid_) {
+  dfork_dirty_set.erase(soid_.oid.name);
+}
+/* end */
 
 /**
  * The CopyCallback class defines an interface for completions to the
@@ -5679,6 +5772,11 @@ int PrimaryLogPG::do_read(OpContext *ctx, OSDOp& osd_op) {
                            << std::dec << " on " << soid;
         r = -EIO; // try repair later
       }
+      /* linanqinqin */
+      // if ("rbd_id.bar" == soid.oid.name.c_str()) {
+      // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin osd_read_content " << osd_op.outdata.c_str() << dendl;
+      // }
+      /* end */
     }
     if (r == -EIO) {
       r = rep_repair_primary_object(soid, ctx);
@@ -5797,7 +5895,12 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
   SnapSetContext *ssc = ctx->obc->ssc;
   ObjectState& obs = ctx->new_obs;
   object_info_t& oi = obs.oi;
+  /* original */
   const hobject_t& soid = oi.soid;
+  /* end */
+  /* linanqinqin */
+  // hobject_t& soid = oi.soid;
+  /* end */
   const bool skip_data_digest = osd->store->has_builtin_csum() &&
     osd->osd_skip_data_digest;
 
@@ -5906,6 +6009,9 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       // fall through
     case CEPH_OSD_OP_READ:
       ++ctx->num_read;
+      /* linanqinqin */
+      // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin osd_read " << soid.oid.name.c_str() << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_read, soid.oid.name.c_str(),
 		 soid.snap.val, oi.size, oi.truncate_seq, op.extent.offset,
 		 op.extent.length, op.extent.truncate_size,
@@ -6508,6 +6614,25 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       ++ctx->num_write;
       result = 0;
       { // write
+      /* linanqinqin */
+        if (set_dfork_dirty(soid)) {
+          // using map
+          // for (auto it = dfork_dirty_map.cbegin(); it!=dfork_dirty_map.cend(); it++) {
+          //   dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin " 
+          //                                    << it->first << ": " << (int) it->second << dendl;
+          // }
+
+          // using set
+          // string out_str;
+          // for (auto it = dfork_dirty_set.begin(); it!=dfork_dirty_set.end(); it++) {
+          //   out_str += *it + "-";
+          // }
+          // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin set: " << out_str << dendl;
+
+          dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin write: " 
+                                           << soid.oid.name << dendl;
+        }
+      /* end */
         __u32 seq = oi.truncate_seq;
 	tracepoint(osd, do_osd_op_pre_write, soid.oid.name.c_str(), soid.snap.val, oi.size, seq, op.extent.offset, op.extent.length, op.extent.truncate_size, op.extent.truncate_seq);
 	if (op.extent.length != osd_op.indata.length()) {
@@ -7598,6 +7723,17 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
     case CEPH_OSD_OP_OMAPGETVALSBYKEYS:
       ++ctx->num_read;
       {
+      /* linanqinqin */
+      // const hobject_t& lnqq_soid {object_t("rbd_header.110f9042e2f0"), "", soid.snap, 1016350423, 4, ""};
+      // soid.oid = object_t("rbd_header.112d7fe768cd");
+      // soid.pool = 4;
+      // soid.set_hash(4055571207);
+      // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin osd_omapgetvalsbykeys "
+      //                                  << soid.oid.name.c_str() << " "
+      //                                  << soid.pool << " " << soid.nspace << " "
+      //                                  << soid.get_hash() << " " << soid.get_key()
+      //                                  << dendl;
+      /* end */
 	set<string> keys_to_get;
 	try {
 	  decode(keys_to_get, bp);
@@ -7610,7 +7746,19 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	tracepoint(osd, do_osd_op_pre_omapgetvalsbykeys, soid.oid.name.c_str(), soid.snap.val, list_entries(keys_to_get).c_str());
 	map<string, bufferlist> out;
 	if (oi.is_omap()) {
+    /* original */
 	  osd->store->omap_get_values(ch, ghobject_t(soid), keys_to_get, &out);
+    /* end */
+    /* linanqinqin */
+    // if (soid.oid.name.compare("rbd_header.112d7fe768cd") == 0) {
+    //   dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin original" << dendl;
+    //   osd->store->omap_get_values(ch, ghobject_t(soid), keys_to_get, &out);
+    // }
+    // else {
+    //   dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin new" << dendl;
+    //   osd->store->omap_get_values(ch, ghobject_t(lnqq_soid), keys_to_get, &out);
+    // }
+    /* end */
 	} // else return empty omap entries
 	encode(out, osd_op.outdata);
 	ctx->delta_stats.num_rd_kb += shift_round_up(osd_op.outdata.length(), 10);

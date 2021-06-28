@@ -231,9 +231,11 @@ int get_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
   return 0;
 }
 
-void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty) {
+void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty, 
+                     const std::string &location_oid) {
   bufferlist bl;
   encode(dirty, bl);
+  encode(location_oid, bl);
   op->exec("rbd", "set_dfork_dirty", bl);
 }
 
@@ -256,6 +258,38 @@ int check_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
 void unblock_dfork_dirty(librados::ObjectWriteOperation *op) {
   bufferlist bl;
   op->exec("rbd", "unblock_dfork_dirty", bl);
+}
+
+void get_dfork_dirty_locations_start(librados::ObjectReadOperation *op) {
+  bufferlist bl;
+  op->exec("rbd", "get_dfork_dirty_locations", bl);
+}
+
+int get_dfork_dirty_locations_finish(bufferlist::const_iterator *it, 
+                                     std::string *locations) {
+  try {
+    decode(*locations, *it);
+  } catch (const ceph::buffer::error &err) {
+    return -EBADMSG;
+  }
+  return 0;
+}
+
+void __set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty) {
+  bufferlist bl;
+  encode(dirty, bl);
+  op->exec("rbd", "__set_dfork_dirty", bl);
+}
+
+void clear_dfork_dirty_locations(librados::ObjectWriteOperation *op, bool do_erase) {
+  bufferlist bl;
+  encode(do_erase, bl);
+  op->exec("rbd", "clear_dfork_dirty_locations", bl);
+}
+
+void reset_dfork_dirty(librados::ObjectWriteOperation *op) {
+  bufferlist bl;
+  op->exec("rbd", "reset_dfork_dirty", bl);
 }
 /* end */
 

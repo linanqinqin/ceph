@@ -526,9 +526,10 @@ namespace librbd {
 
   /* linanqinqin */
   int RBD::set_dfork_dirty(IoCtx& io_ctx, const char *name, 
-                           const char *id, uint8_t dirty) {
+                           const char *id, uint8_t dirty, 
+                           const char *loc_oid) {
 
-    int r = librbd::set_dfork_dirty(io_ctx, name, id, dirty);
+    int r = librbd::set_dfork_dirty(io_ctx, name, id, dirty, loc_oid);
     return r;
   }
 
@@ -563,6 +564,12 @@ namespace librbd {
   int RBD::unblock_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id) {
 
     int r = librbd::unblock_dfork_dirty(io_ctx, name, id);
+    return r;
+  }
+
+  int RBD::reset_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id) {
+
+    int r = librbd::reset_dfork_dirty(io_ctx, name, id);
     return r;
   }
   /* end */

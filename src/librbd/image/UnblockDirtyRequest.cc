@@ -12,7 +12,7 @@
 #define dout_prefix *_dout << "librbd::image::UnblockDirtyRequest: "
 
 /* linanqinqin */
-#define LNQQ_DOUT_CheckDirtyReq_LVL 0
+#define LNQQ_DOUT_UnblockDirtyReq_LVL 10
 /* end */
 
 namespace librbd {
@@ -84,7 +84,7 @@ void UnblockDirtyRequest<I>::handle_get_id(int r) {
 
 template <typename I>
 void UnblockDirtyRequest<I>::send_unblock_dfork_dirty() {
-  ldout(m_cct, LNQQ_DOUT_CheckDirtyReq_LVL) << __func__ << dendl;
+  ldout(m_cct, LNQQ_DOUT_UnblockDirtyReq_LVL) << __func__ << dendl;
 
   librados::ObjectWriteOperation op;
   cls_client::unblock_dfork_dirty(&op);

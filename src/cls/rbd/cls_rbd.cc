@@ -837,9 +837,16 @@ int create(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   /* linanqinqin */
   uint8_t dirty = 0;
+  std::string dirty_locations;
+
   bufferlist dirtybl;
+  bufferlist dirty_locbl;
+
   encode(dirty, dirtybl);
+  encode(dirty_locations, dirty_locbl);
+
   omap_vals["dfork_dirty"] = dirtybl;
+  omap_vals["dfork_dirty_locations"] = dirty_locbl;
   /* end */
 
   if ((features & RBD_FEATURE_OPERATIONS) != 0ULL) {
@@ -1120,21 +1127,26 @@ int get_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
 /**
  * Input:
  * @param dirty_bit the new dirty bit value of the image (uint8_t)
+ * @param location_oid the oid associated with the location of the sender (string)
  *
  * Output:
  * @returns 0 on success, negative error code on failure
  */
+// for blocking
 std::mutex dfork_dirty_mtx;
 set<string> block_set;
+
 int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
   uint8_t dirty;
+  std::string location_oid;
   std::string image_id = cls_get_target_rbd_image_name(hctx);;
 
   // taking input
   auto iter = in->cbegin();
   try {
     decode(dirty, iter);
+    decode(location_oid, iter);
   } catch (const ceph::buffer::error &err) {
     return -EINVAL;
   }
@@ -1146,10 +1158,46 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
 
     dfork_dirty_mtx.unlock();
 
-    CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dfork_dirty blocked");
+    // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dfork_dirty blocked");
     return -EPERM;
   }
 
+  // update the locations
+  if (!location_oid.empty()) {
+
+    // read the original locations string to make sure this is a header
+    // object that was created correctly
+    std::string orig_locations;
+    int r = read_key(hctx, "dfork_dirty_locations", &orig_locations);
+    if (r < 0) {
+      dfork_dirty_mtx.unlock();
+      CLS_ERR("Could not read image's dirty bit locations off disk: %s", 
+              cpp_strerror(r).c_str());
+      return r;
+    }
+
+    // appending the new oid to the locations string
+    if (orig_locations.empty()) {
+      orig_locations = location_oid;
+    }
+    else {
+      orig_locations += '&'+location_oid;
+    }
+
+    bufferlist dirty_locbl;
+    encode(orig_locations, dirty_locbl);
+    r = cls_cxx_map_set_val(hctx, "dfork_dirty_locations", &dirty_locbl);
+    if (r < 0) {
+      dfork_dirty_mtx.unlock();
+      CLS_ERR("error writing dfork_dirty_locations metadata: %s", 
+              cpp_strerror(r).c_str());
+      return r;
+    }
+
+    // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin new loc string: %s", 
+    //         orig_locations.c_str());
+  }
+  
   // check that the dirty bit exists to make sure this is a header object
   // that was created correctly
   uint8_t orig_dirty;
@@ -1164,14 +1212,19 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
   CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "set_dfork_dirty dirty=%u orig_dirty=%u", (uint32_t)dirty,
           (uint32_t)orig_dirty);
 
-  // write the new dirty bit 
-  bufferlist dirtybl;
-  encode(dirty, dirtybl);
-  r = cls_cxx_map_set_val(hctx, "dfork_dirty", &dirtybl);
-  dfork_dirty_mtx.unlock();
-  if (r < 0) {
-    CLS_ERR("error writing snapshot metadata: %s", cpp_strerror(r).c_str());
-    return r;
+  // write the new dirty bit only when the new value is different
+  if (dirty != orig_dirty) {
+    bufferlist dirtybl;
+    encode(dirty, dirtybl);
+    r = cls_cxx_map_set_val(hctx, "dfork_dirty", &dirtybl);
+    dfork_dirty_mtx.unlock();
+    if (r < 0) {
+      CLS_ERR("error writing snapshot metadata: %s", cpp_strerror(r).c_str());
+      return r;
+    }
+  }
+  else {
+    dfork_dirty_mtx.unlock();
   }
 
   return 0;
@@ -1233,9 +1286,156 @@ int unblock_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *o
 
   std::string image_id = cls_get_target_rbd_image_name(hctx);
 
+  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s unblocked", image_id.c_str());
+
   dfork_dirty_mtx.lock();
   block_set.erase(image_id);
   dfork_dirty_mtx.unlock();
+
+  return 0;
+}
+
+/**
+ * Input:
+ * none
+ *
+ * Output:
+ * @param loc_string a string consisting of the location oids (std::string)
+ * @returns 0 on success, negative error code on failure
+ */
+int get_dfork_dirty_locations(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  // std::string oid = cls_get_target_rbd_image_name(hctx);
+  std::string oid = cls_get_target_oid_name(hctx);
+
+  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s is here", oid.c_str());
+
+  // the lock will be released at a later call of xxx
+  dfork_dirty_mtx.lock();
+
+  std::string dirty_locations;
+  int r = read_key(hctx, "dfork_dirty_locations", &dirty_locations);
+  if (r < 0) {
+    dfork_dirty_mtx.unlock();
+    CLS_ERR("Could not read image's dirty bit locations off disk: %s", 
+            cpp_strerror(r).c_str());
+    return r;
+  }
+
+  encode(dirty_locations, *out);
+
+  return 0;
+}
+
+/**
+ * Input:
+ * @param dirty_bit the new dirty bit value of the image (uint8_t)
+ *
+ * Output:
+ * @returns 0 on success, negative error code on failure
+ */
+/* This method is only for the use in ResetDirtyRequest
+ * dfork_dirty_mtx will not be aquirced since the preceding 
+ * get_dfork_dirty_locations() holds the lock and will be later 
+ * on released by a clear_dfork_dirty_locations() call
+ */
+int __set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  uint8_t dirty;
+
+  // taking input
+  auto iter = in->cbegin();
+  try {
+    decode(dirty, iter);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+  
+  // check that the dirty bit exists to make sure this is a header object
+  // that was created correctly
+  uint8_t orig_dirty;
+  int r = read_key(hctx, "dfork_dirty", &orig_dirty);
+  if (r < 0) {
+    CLS_ERR("Could not read image's dirty bit off disk: %s", cpp_strerror(r).c_str());
+    return r;
+  }
+
+  // write the new dirty bit only when the new value is different
+  if (dirty != orig_dirty) {
+    bufferlist dirtybl;
+    encode(dirty, dirtybl);
+    r = cls_cxx_map_set_val(hctx, "dfork_dirty", &dirtybl);
+    if (r < 0) {
+      CLS_ERR("error writing snapshot metadata: %s", cpp_strerror(r).c_str());
+      return r;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Input:
+ * @param do_erase bool variable indicating whether the location string should 
+ *                 be erased (whether the previous reset call succeeded)
+ *
+ * Output:
+ * @param loc_string a string consisting of the location oids (std::string)
+ * @returns 0 on success, negative error code on failure
+ */
+int clear_dfork_dirty_locations(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  bool do_erase;
+
+  // taking input
+  auto iter = in->cbegin();
+  try {
+    decode(do_erase, iter);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+
+  if (do_erase) {
+
+    std::string empty_locations;
+    bufferlist dirty_locbl;
+    encode(empty_locations, dirty_locbl);
+
+    int r = cls_cxx_map_set_val(hctx, "dfork_dirty_locations", &dirty_locbl);
+    if (r < 0) {
+      dfork_dirty_mtx.unlock();
+      CLS_ERR("error writing dfork_dirty_locations metadata: %s", 
+              cpp_strerror(r).c_str());
+      return r;
+    }
+  }
+
+  dfork_dirty_mtx.unlock();
+
+  return 0;
+}
+
+/**
+ * Input:
+ * none
+ *
+ * Output:
+ * @returns 0 on success, negative error code on failure
+ */
+extern set<string> dfork_dirty_set;
+extern std::mutex dfork_dirty_set_mtx;
+int reset_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  std::string oid = cls_get_target_oid_name(hctx);
+  std::string image_id = cls_get_target_rbd_image_name(hctx);
+
+  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s you tracked me down!", oid.c_str());
+
+  dfork_dirty_set_mtx.lock();
+  dfork_dirty_set.erase(image_id);
+  dfork_dirty_set_mtx.unlock();
+
+  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s is reset", image_id.c_str());
 
   return 0;
 }
@@ -8255,6 +8455,10 @@ CLS_INIT(rbd)
   cls_method_handle_t h_set_dfork_dirty;
   cls_method_handle_t h_check_dfork_dirty;
   cls_method_handle_t h_unblock_dfork_dirty;
+  cls_method_handle_t h_get_dfork_dirty_locations;
+  cls_method_handle_t h___set_dfork_dirty;
+  cls_method_handle_t h_clear_dfork_dirty_locations;
+  cls_method_handle_t h_reset_dfork_dirty;
   /* end */
   cls_method_handle_t h_get_parent;
   cls_method_handle_t h_set_parent;
@@ -8411,6 +8615,18 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "unblock_dfork_dirty",
         CLS_METHOD_WR,
         unblock_dfork_dirty, &h_unblock_dfork_dirty);
+  cls_register_cxx_method(h_class, "get_dfork_dirty_locations",
+        CLS_METHOD_RD,
+        get_dfork_dirty_locations, &h_get_dfork_dirty_locations);
+  cls_register_cxx_method(h_class, "__set_dfork_dirty",
+        CLS_METHOD_RD | CLS_METHOD_WR,
+        __set_dfork_dirty, &h___set_dfork_dirty);
+  cls_register_cxx_method(h_class, "clear_dfork_dirty_locations",
+        CLS_METHOD_RD | CLS_METHOD_WR,
+        clear_dfork_dirty_locations, &h_clear_dfork_dirty_locations);
+  cls_register_cxx_method(h_class, "reset_dfork_dirty",
+        CLS_METHOD_WR,
+        reset_dfork_dirty, &h_reset_dfork_dirty);
   /* end */
   cls_register_cxx_method(h_class, "get_snapcontext",
 			  CLS_METHOD_RD,
