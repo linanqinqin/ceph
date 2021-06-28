@@ -236,7 +236,8 @@ This API supports the abort-dfork() fault-tolerance approach, with the
 
 #### Dirty bit actions (for internal use)
 
-	rbd dfork __dirty foo --set|--clear    # set/clear the dirty bit of foo
+	rbd dfork __dirty foo --set|--clear 	# set/clear the dirty bit of foo
+	rbd dfork __dirty foo --reset 			# reset the dirty bit
 
 Set or clear the dirty bit of a given image. This API is not supposed to 
 be exposed to clients but only for development use.
