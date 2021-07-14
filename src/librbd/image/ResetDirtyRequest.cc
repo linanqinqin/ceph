@@ -6,6 +6,7 @@
 #include "common/errno.h"
 #include "cls/rbd/cls_rbd_client.h"
 #include "librbd/Utils.h"
+#include "librbd/ObjectMap.h"
 
 #define dout_subsys ceph_subsys_rbd
 #undef dout_prefix
@@ -176,7 +177,7 @@ void ResetDirtyRequest<I>::send_reset_dfork_dirty() {
     comp->release();
   }
   else {
-    send_clear_dfork_dirty();
+    send_clear_dfork_dirty_v2_cache();
   }
 }
 
@@ -194,6 +195,37 @@ void ResetDirtyRequest<I>::handle_reset_dfork_dirty(int r) {
     m_error_result = r;
     send_clear_dfork_dirty_locations();
   }
+}
+
+template <typename I>
+void ResetDirtyRequest<I>::send_clear_dfork_dirty_v2_cache() {
+  ldout(m_cct, LNQQ_DOUT_ResetDirtyReq_LVL) << __func__ << dendl;
+
+  librados::ObjectWriteOperation op;
+  cls_client::clear_dfork_dirty_cache(&op);
+
+  using klass = ResetDirtyRequest<I>;
+  librados::AioCompletion *comp =
+    create_rados_callback<klass, &klass::handle_clear_dfork_dirty_v2_cache>(this);
+
+  m_omap_id = ObjectMap<I>::object_map_name(m_image_id, CEPH_NOSNAP);
+  int r = m_io_ctx.aio_operate(m_omap_id, comp, &op);
+  ceph_assert(r == 0);
+  comp->release();
+}
+
+template <typename I>
+void ResetDirtyRequest<I>::handle_clear_dfork_dirty_v2_cache(int r) {
+  ldout(m_cct, LNQQ_DOUT_ResetDirtyReq_LVL) << __func__ << dendl;
+
+  if (r < 0) {
+    lderr(m_cct) << "clear v2 dirty cache failed: " << cpp_strerror(r)
+                 << dendl;
+    m_error_result = r;
+    send_clear_dfork_dirty_locations();
+  }
+
+  send_clear_dfork_dirty();
 }
 
 template <typename I>

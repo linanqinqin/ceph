@@ -291,6 +291,11 @@ void reset_dfork_dirty(librados::ObjectWriteOperation *op) {
   bufferlist bl;
   op->exec("rbd", "reset_dfork_dirty", bl);
 }
+
+void clear_dfork_dirty_cache(librados::ObjectWriteOperation *op) {
+  bufferlist bl;
+  op->exec("rbd", "clear_dfork_dirty_cache", bl);
+}
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id) {
