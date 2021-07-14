@@ -17,10 +17,6 @@
 #undef dout_prefix
 #define dout_prefix *_dout << "librbd::SnapshotCreateRequest: "
 
-/* linanqinqin */
-#define LNQQ_DOUT_SnapCreateReq_LVL 100
-/* end */
-
 namespace librbd {
 namespace operation {
 
@@ -41,38 +37,13 @@ SnapshotCreateRequest<I>::SnapshotCreateRequest(I &image_ctx,
     m_skip_object_map(flags & SNAP_CREATE_FLAG_SKIP_OBJECT_MAP),
     m_skip_notify_quiesce(flags & SNAP_CREATE_FLAG_SKIP_NOTIFY_QUIESCE),
     m_ignore_notify_quiesce_error(flags & SNAP_CREATE_FLAG_IGNORE_NOTIFY_QUIESCE_ERROR),
-    m_prog_ctx(prog_ctx),
-    /* linanqinqin */
-    m_for_dfork(flags & SNAP_CREATE_FLAG_FOR_DFORK)
-    /* end */ {
+    m_prog_ctx(prog_ctx) {
 }
 
 template <typename I>
 void SnapshotCreateRequest<I>::send_op() {
   I &image_ctx = this->m_image_ctx;
   CephContext *cct = image_ctx.cct;
-
-  /* linanqinqin */
-  // validate this request, if it is for dfork
-  if (m_for_dfork) {
-    ldout(cct, LNQQ_DOUT_SnapCreateReq_LVL) << "linanqinqin this snap is for dfork"
-                                            << dendl;
-
-    // check image format
-    if (image_ctx.old_format) {
-      lderr(cct) << "old image format not supported for dfork" << dendl;
-      this->async_complete(-EOPNOTSUPP);
-      return;
-    }
-
-    // check support for object map
-    if (image_ctx.object_map == nullptr || m_skip_object_map) {
-      lderr(cct) << "dfork requires object_map feature" << dendl;
-      this->async_complete(-EOPNOTSUPP);
-      return;
-    }
-  }
-  /* end */
 
   if (!image_ctx.data_ctx.is_valid()) {
     lderr(cct) << "missing data pool" << dendl;
@@ -177,12 +148,7 @@ void SnapshotCreateRequest<I>::send_append_op_event() {
   if (!this->template append_op_event<
         SnapshotCreateRequest<I>,
         &SnapshotCreateRequest<I>::handle_append_op_event>(this)) {
-    /* original 
     send_allocate_snap_id();
-       end */
-    /* linanqinqin */
-    send_clear_dirty_bit_cache();
-    /* end */
     return;
   }
 
@@ -203,94 +169,9 @@ Context *SnapshotCreateRequest<I>::handle_append_op_event(int *result) {
     return send_notify_unquiesce();
   }
 
-  /* original 
-  send_allocate_snap_id();
-     end */
-  /* linanqinqin */
-  send_clear_dirty_bit_cache();
-  /* end */
-  return nullptr;
-}
-
-/* linanqinqin */
-template <typename I>
-void SnapshotCreateRequest<I>::send_clear_dirty_bit_cache() {
-  I &image_ctx = this->m_image_ctx;
-  CephContext *cct = image_ctx.cct;
-  ldout(cct, 5) << this << " " << __func__ << dendl;
-
-  // if (image_ctx.old_format) {
-  //   lderr(cct) << "old format not supported for dfork: " // << cpp_strerror(*result)
-  //              << dendl;
-  //   // save_result(result);
-  //   return send_notify_unquiesce();
-  // }
-
-  librados::ObjectWriteOperation op;
-  cls_client::clear_dfork_dirty_cache(&op);
-
-  librados::AioCompletion *rados_completion = create_rados_callback<
-    SnapshotCreateRequest<I>,
-    &SnapshotCreateRequest<I>::handle_clear_dirty_bit_cache>(this);
-  std::string omap_oid(ObjectMap<>::object_map_name(image_ctx.id, CEPH_NOSNAP));
-  int r = image_ctx.md_ctx.aio_operate(omap_oid,
-                                       rados_completion, &op);
-  ceph_assert(r == 0);
-  rados_completion->release();
-}
-
-template <typename I>
-Context *SnapshotCreateRequest<I>::handle_clear_dirty_bit_cache(int *result) {
-  I &image_ctx = this->m_image_ctx;
-  CephContext *cct = image_ctx.cct;
-  ldout(cct, 5) << this << " " << __func__ << ": r=" << *result << dendl;
-
-  if (*result < 0) {
-    lderr(cct) << "failed to clear the dirty bit cache: " << cpp_strerror(*result)
-               << dendl;
-    save_result(result);
-    return send_notify_unquiesce();
-  }
-
-  send_clear_dirty_bit_meta();
-  return nullptr;
-}
-
-template <typename I>
-void SnapshotCreateRequest<I>::send_clear_dirty_bit_meta() {
-  I &image_ctx = this->m_image_ctx;
-  CephContext *cct = image_ctx.cct;
-  ldout(cct, 5) << this << " " << __func__ << dendl;
-
-  librados::ObjectWriteOperation op;
-  cls_client::__set_dfork_dirty(&op, 0);
-
-  librados::AioCompletion *rados_completion = create_rados_callback<
-    SnapshotCreateRequest<I>,
-    &SnapshotCreateRequest<I>::handle_clear_dirty_bit_meta>(this);
-  int r = image_ctx.md_ctx.aio_operate(image_ctx.header_oid,
-                                       rados_completion, &op);
-  ceph_assert(r == 0);
-  rados_completion->release();
-}
-
-template <typename I>
-Context *SnapshotCreateRequest<I>::handle_clear_dirty_bit_meta(int *result) {
-  I &image_ctx = this->m_image_ctx;
-  CephContext *cct = image_ctx.cct;
-  ldout(cct, 5) << this << " " << __func__ << ": r=" << *result << dendl;
-
-  if (*result < 0) {
-    lderr(cct) << "failed to clear the dirty bit metadata: " << cpp_strerror(*result)
-               << dendl;
-    save_result(result);
-    return send_notify_unquiesce();
-  }
-
   send_allocate_snap_id();
   return nullptr;
 }
-/* end */
 
 template <typename I>
 void SnapshotCreateRequest<I>::send_allocate_snap_id() {
@@ -387,14 +268,6 @@ Context *SnapshotCreateRequest<I>::send_create_object_map() {
 
   CephContext *cct = image_ctx.cct;
   ldout(cct, 5) << this << " " << __func__ << dendl;
-  /* linanqinqin */
-  std::string omap_oid(ObjectMap<>::object_map_name(image_ctx.id, CEPH_NOSNAP));
-  ldout(cct, LNQQ_DOUT_SnapCreateReq_LVL) << this << " " << __func__ << " "
-                                          << image_ctx.name << " " 
-                                          << image_ctx.id << " " 
-                                          << omap_oid << " " 
-                                          << image_ctx.header_oid << dendl;
-  /* end */
 
   image_ctx.object_map->snapshot_add(
     m_snap_id, create_context_callback<

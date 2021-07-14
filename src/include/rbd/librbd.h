@@ -121,9 +121,6 @@ typedef struct {
 
 #define RBD_SNAP_CREATE_SKIP_QUIESCE		(1 << 0)
 #define RBD_SNAP_CREATE_IGNORE_QUIESCE_ERROR	(1 << 1)
-/* linanqinqin */
-#define RBD_SNAP_CREATE_FOR_DFORK       (1 << 2)
-/* end */
 
 #define RBD_SNAP_REMOVE_UNPROTECT	(1 << 0)
 #define RBD_SNAP_REMOVE_FLATTEN		(1 << 1)

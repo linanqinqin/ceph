@@ -20,8 +20,8 @@ template <typename ImageCtxT = ImageCtx>
 class ResetDirtyRequest {
 public:
   static ResetDirtyRequest *create(IoCtx &ioctx, const std::string &image_name, 
-                                   const std::string &image_id, 
-                                   Context *on_finish) {
+                                 const std::string &image_id, 
+                                 Context *on_finish) {
     return new ResetDirtyRequest(ioctx, image_name, image_id, on_finish);
   }
 
@@ -44,11 +44,8 @@ private:
    *    v  (lock held)         (on error) |
    * GET_DFORK_DIRTY_LOCATIONS------------|
    *    |                 (lock released) |
-   *    v              (on error)         |
+   *    v                                 |
    * RESET_DFORK_DIRTY--------------\     |
-   *    |                           |     |
-   *    v                           |     |
-   * CLEAR_DFORK_DIRTY_V2_CACHE-----|     |
    *    |                           |     |
    *    v                           |     |
    * CLEAR_DFORK_DIRTY--------------|     |
@@ -66,7 +63,7 @@ private:
    */
 
   ResetDirtyRequest(IoCtx &ioctx, const std::string &image_name, 
-                    const std::string &image_id, Context *on_finish);
+                  const std::string &image_id, Context *on_finish);
 
   IoCtx m_io_ctx;
 
@@ -79,8 +76,6 @@ private:
   bufferlist m_out_bl;
   std::string m_locations;
   
-  std::string m_omap_id;
-
   CephContext *m_cct;
   int m_error_result;
 
@@ -94,9 +89,6 @@ private:
 
   void send_reset_dfork_dirty();
   void handle_reset_dfork_dirty(int r);
-
-  void send_clear_dfork_dirty_v2_cache();
-  void handle_clear_dfork_dirty_v2_cache(int r);
 
   void send_clear_dfork_dirty();
   void handle_clear_dfork_dirty(int r);

@@ -45,7 +45,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 
 /* linanqinqin */
-#define LNQQ_DOUT_cls_rbd_LVL 100
+#define LNQQ_DOUT_cls_rbd_LVL 0
 /* end */
 
 using std::istringstream;
@@ -1133,14 +1133,14 @@ int get_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
  * @returns 0 on success, negative error code on failure
  */
 // for blocking
-std::mutex dfork_dirty_mtx;   // for accessing the dirty bit metadata and block set
+std::mutex dfork_dirty_mtx;
 set<string> block_set;
 
 int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
   uint8_t dirty;
   std::string location_oid;
-  std::string image_id = cls_get_target_rbd_image_name(hctx);
+  std::string image_id = cls_get_target_rbd_image_name(hctx);;
 
   // taking input
   auto iter = in->cbegin();
@@ -3722,11 +3722,6 @@ int object_map_read(cls_method_context_t hctx, BitVector<2> &object_map)
  */
 int object_map_load(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
-  /* linanqinqin */
-  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
-  //         cls_get_target_oid_name(hctx).c_str());
-  /* end */
-
   BitVector<2> object_map;
   int r = object_map_read(hctx, object_map);
   if (r < 0) {
@@ -3749,11 +3744,6 @@ int object_map_load(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
  */
 int object_map_save(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
-  /* linanqinqin */
-  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
-  //         cls_get_target_oid_name(hctx).c_str());
-  /* end */
-
   BitVector<2> object_map;
   try {
     auto iter = in->cbegin();
@@ -3783,11 +3773,6 @@ int object_map_save(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
  */
 int object_map_resize(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
-  /* linanqinqin */
-  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
-  //         cls_get_target_oid_name(hctx).c_str());
-  /* end */
-
   uint64_t object_count;
   uint8_t default_state;
   try {
@@ -3838,70 +3823,6 @@ int object_map_resize(cls_method_context_t hctx, bufferlist *in, bufferlist *out
   return cls_cxx_write_full(hctx, &map);
 }
 
-/* linanqinqin */
-// using a set for the local dirty bit cache
-set<string> dfork_dirty_cache;
-std::mutex dfork_dirty_cache_mtx;
-
-// the internal function for setting the dirty bit
-int set_dirty_bit(const std::string &image_id) {
-
-  if (dfork_dirty_cache.find(image_id) != dfork_dirty_cache.end()) {
-    // already dirty
-    CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin already dirty");
-    return 0;
-  }
-  else {
-    // clean
-    CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin clean");
-
-    dfork_dirty_cache_mtx.lock();
-
-    // check again
-    if (dfork_dirty_cache.find(image_id) != dfork_dirty_cache.end()) {
-      dfork_dirty_cache_mtx.unlock();
-      return 0;
-    }
-
-    std::string rbd_cmd = "/mnt/ceph/build/bin/rbd dfork __dirty -c /mnt/ceph/build/ceph.conf --image-id=" 
-                          + image_id + " --set &>/dev/null";
-
-    int r = WEXITSTATUS(std::system(rbd_cmd.c_str()));
-    if (r) {
-      dfork_dirty_cache_mtx.unlock();
-      return r;
-    }
-    else {
-      dfork_dirty_cache.insert(image_id);
-      dfork_dirty_cache_mtx.unlock();
-      return 0;
-    }
-  }
-}
-
-/**
- * Clear the dirty bit cache for the given rbd image
- *
- * Input:
- * none
- *
- * Output:
- * @returns 0 on success, negative error code on failure
- */
-int clear_dfork_dirty_cache(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
-
-  std::string image_id = cls_get_target_rbd_image_name(hctx);
-
-  dfork_dirty_cache_mtx.lock();
-  dfork_dirty_cache.erase(image_id);
-  dfork_dirty_cache_mtx.unlock();
-
-  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin dirty cache for %s is cleared", image_id.c_str());
-
-  return 0;
-}
-/* end */
-
 /**
  * Update an rbd image's object map
  *
@@ -3916,25 +3837,6 @@ int clear_dfork_dirty_cache(cls_method_context_t hctx, bufferlist *in, bufferlis
  */
 int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
-  /* linanqinqin */
-  std::string image_id = cls_get_target_rbd_image_name(hctx);
-
-  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
-          image_id.c_str());
-
-  {
-    int r = set_dirty_bit(image_id);
-    if (r) {
-      CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dirty_bit failed: %s r=%d", 
-          image_id.c_str(), r);
-    }
-    else {
-      CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dirty_bit for: %s", 
-          image_id.c_str());
-    }
-  }
-  /* end */
-
   uint64_t start_object_no;
   uint64_t end_object_no;
   uint8_t new_object_state;
@@ -4092,11 +3994,6 @@ int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out
 int object_map_snap_add(cls_method_context_t hctx, bufferlist *in,
                         bufferlist *out)
 {
-  /* linanqinqin */
-  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
-  //         cls_get_target_oid_name(hctx).c_str());
-  /* end */
-
   BitVector<2> object_map;
   int r = object_map_read(hctx, object_map);
   if (r < 0) {
@@ -4134,11 +4031,6 @@ int object_map_snap_add(cls_method_context_t hctx, bufferlist *in,
 int object_map_snap_remove(cls_method_context_t hctx, bufferlist *in,
                            bufferlist *out)
 {
-  /* linanqinqin */
-  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
-  //         cls_get_target_oid_name(hctx).c_str());
-  /* end */
-
   BitVector<2> src_object_map;
   try {
     auto iter = in->cbegin();
@@ -8566,8 +8458,7 @@ CLS_INIT(rbd)
   cls_method_handle_t h_get_dfork_dirty_locations;
   cls_method_handle_t h___set_dfork_dirty;
   cls_method_handle_t h_clear_dfork_dirty_locations;
-  cls_method_handle_t h_reset_dfork_dirty;  // old method for clearing the dirty cache
-  cls_method_handle_t h_clear_dfork_dirty_cache;  // new method for clearing the dirty cache
+  cls_method_handle_t h_reset_dfork_dirty;
   /* end */
   cls_method_handle_t h_get_parent;
   cls_method_handle_t h_set_parent;
@@ -8736,9 +8627,6 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "reset_dfork_dirty",
         CLS_METHOD_WR,
         reset_dfork_dirty, &h_reset_dfork_dirty);
-  cls_register_cxx_method(h_class, "clear_dfork_dirty_cache",
-        CLS_METHOD_WR,
-        clear_dfork_dirty_cache, &h_clear_dfork_dirty_cache);
   /* end */
   cls_register_cxx_method(h_class, "get_snapcontext",
 			  CLS_METHOD_RD,

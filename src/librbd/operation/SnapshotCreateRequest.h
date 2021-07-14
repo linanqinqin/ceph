@@ -101,10 +101,6 @@ private:
   uint64_t m_size;
   ParentImageInfo m_parent_info;
 
-  /* linanqinqin */
-  bool m_for_dfork;
-  /* end */
-
   void send_notify_quiesce();
   Context *handle_notify_quiesce(int *result);
 
@@ -116,14 +112,6 @@ private:
 
   void send_append_op_event();
   Context *handle_append_op_event(int *result);
-
-  /* linanqinqin */
-  void send_clear_dirty_bit_cache();
-  Context *handle_clear_dirty_bit_cache(int *result);
-
-  void send_clear_dirty_bit_meta();
-  Context *handle_clear_dirty_bit_meta(int *result);
-  /* end */
 
   void send_allocate_snap_id();
   Context *handle_allocate_snap_id(int *result);
