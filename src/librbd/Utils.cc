@@ -164,6 +164,13 @@ int snap_create_flags_api_to_internal(CephContext *cct, uint32_t api_flags,
     api_flags &= ~RBD_SNAP_CREATE_IGNORE_QUIESCE_ERROR;
   }
 
+  /* linanqinqin */
+  if (api_flags & RBD_SNAP_CREATE_FOR_DFORK) {
+    *internal_flags |= SNAP_CREATE_FLAG_FOR_DFORK;
+    api_flags &= ~RBD_SNAP_CREATE_FOR_DFORK;
+  }
+  /* end */
+
   if (api_flags != 0) {
     lderr(cct) << "invalid snap create flags: "
                      << std::bitset<32>(api_flags) << dendl;

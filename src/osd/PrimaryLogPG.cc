@@ -74,7 +74,7 @@
 #define dout_prefix _prefix(_dout, this)
 
 /* linanqinqin */
-#define LNQQ_DOUT_PrimaryLogPG_LVL 0
+#define LNQQ_DOUT_PrimaryLogPG_LVL 100
 /* end */
 
 #include <sstream>
@@ -6615,7 +6615,7 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       result = 0;
       { // write
       /* linanqinqin */
-        if (set_dfork_dirty(soid)) {
+        // if (set_dfork_dirty(soid)) {
           // using map
           // for (auto it = dfork_dirty_map.cbegin(); it!=dfork_dirty_map.cend(); it++) {
           //   dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin " 
@@ -6629,9 +6629,9 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
           // }
           // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin set: " << out_str << dendl;
 
-          dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin write: " 
-                                           << soid.oid.name << dendl;
-        }
+          // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin write: " 
+                                           // << soid.oid.name << dendl;
+        // }
       /* end */
         __u32 seq = oi.truncate_seq;
 	tracepoint(osd, do_osd_op_pre_write, soid.oid.name.c_str(), soid.snap.val, oi.size, seq, op.extent.offset, op.extent.length, op.extent.truncate_size, op.extent.truncate_seq);
@@ -7606,6 +7606,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
       // OMAP Read ops
     case CEPH_OSD_OP_OMAPGETKEYS:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPGETKEYS " 
+                                       << soid.oid.name << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	string start_after;
@@ -7651,6 +7655,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAPGETVALS:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPGETVALS " 
+                                       << soid.oid.name << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	string start_after;
@@ -7707,6 +7715,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAPGETHEADER:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPGETHEADER " 
+                                       << soid.oid.name << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_omapgetheader, soid.oid.name.c_str(), soid.snap.val);
       if (!oi.is_omap()) {
 	// return empty header
@@ -7721,6 +7733,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAPGETVALSBYKEYS:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPGETVALSBYKEYS " 
+                                       << soid.oid.name << dendl;
+      /* end */
       ++ctx->num_read;
       {
       /* linanqinqin */
@@ -7767,6 +7783,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAP_CMP:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAP_CMP " 
+                                       << soid.oid.name << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	if (!obs.exists || oi.is_whiteout()) {
@@ -7843,6 +7863,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
       // OMAP Write ops
     case CEPH_OSD_OP_OMAPSETVALS:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPSETVALS " 
+                                       << soid.oid.name << dendl;
+      /* end */
       if (!pool.info.supports_omap()) {
 	result = -EOPNOTSUPP;
 	tracepoint(osd, do_osd_op_pre_omapsetvals, soid.oid.name.c_str(), soid.snap.val);
@@ -7883,6 +7907,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAPSETHEADER:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPSETHEADER " 
+                                       << soid.oid.name << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_omapsetheader, soid.oid.name.c_str(), soid.snap.val);
       if (!pool.info.supports_omap()) {
 	result = -EOPNOTSUPP;
@@ -7901,6 +7929,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAPCLEAR:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPCLEAR " 
+                                       << soid.oid.name << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_omapclear, soid.oid.name.c_str(), soid.snap.val);
       if (!pool.info.supports_omap()) {
 	result = -EOPNOTSUPP;
@@ -7924,6 +7956,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAPRMKEYS:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPRMKEYS " 
+                                       << soid.oid.name << dendl;
+      /* end */
       if (!pool.info.supports_omap()) {
 	result = -EOPNOTSUPP;
 	tracepoint(osd, do_osd_op_pre_omaprmkeys, soid.oid.name.c_str(), soid.snap.val);
@@ -7955,6 +7991,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAPRMKEYRANGE:
+      /* linanqinqin */
+      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPRMKEYRANGE " 
+                                       << soid.oid.name << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_omaprmkeyrange, soid.oid.name.c_str(), soid.snap.val);
       if (!pool.info.supports_omap()) {
 	result = -EOPNOTSUPP;

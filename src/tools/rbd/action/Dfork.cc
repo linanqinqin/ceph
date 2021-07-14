@@ -364,6 +364,141 @@ int execute_create(const po::variables_map &vm,
   return 0;
 }
 
+int execute_create_v2(const po::variables_map &vm,
+                   const std::vector<std::string> &ceph_global_init_args) {
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_name;
+  // std::string image_id;
+  std::string snap_name;
+  std::string dfork_name;
+  int r = utils::get_pool_image_snapshot_names(
+    vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
+    &image_name, &dfork_name, true, utils::SNAPSHOT_PRESENCE_REQUIRED,
+    utils::SPEC_VALIDATION_SNAP);
+  if (r < 0) {
+    return r;
+  }
+
+  uint32_t flags;
+  r = utils::get_snap_create_flags(vm, &flags);
+  if (r < 0) {
+    return r;
+  }
+
+  librados::Rados rados;
+  librados::IoCtx io_ctx;
+  librbd::Image image;
+  r = utils::init_and_open_image(pool_name, namespace_name, image_name, "", "",
+                                 false, &rados, &io_ctx, &image);
+  if (r < 0) {
+    std::cerr << "rbd: failed to open image" << cpp_strerror(r)
+              << std::endl;
+    return r;
+  }
+
+  /* get the image id */
+  // uint8_t old_format;
+  // r = image.old_format(&old_format);
+  // if (r < 0) {
+  //   std::cerr << "rbd: image format not supported" << cpp_strerror(r)
+  //             << std::endl;
+  //   return r;
+  // }
+  // if (old_format) {
+  //   std::cerr << "rbd: image format not supported" << cpp_strerror(r)
+  //             << std::endl;
+  //   return r;
+  // } 
+  // else {
+  //   r = image.get_id(&image_id);
+  //   if (r < 0) {
+  //     std::cerr << "rbd: failed to get image id" << cpp_strerror(r)
+  //               << std::endl;
+  //     return r;
+  //   }
+  // }
+
+  /* clear the dfork dirty bit */
+  // uint8_t dirty;
+  // r = image.dirty(&dirty);
+  // if (r < 0)
+  //   return r;
+  // if (dirty) {
+  //   r = do_reset_dfork_dirty(pool_name.c_str(), namespace_name.c_str(), 
+  //                            image_name.c_str(), image_id.c_str());
+  //   if (r < 0) {
+  //     std::cerr << "rbd: reset dfork dirty error: " << cpp_strerror(r) << std::endl;
+  //     return -r;
+  //   }
+  // }
+
+  /* create the snapshot */
+  snap_name = image_name + SNAP_SUFFIX;
+  flags |= RBD_SNAP_CREATE_FOR_DFORK;
+  r = do_add_snap(image, snap_name.c_str(), flags,
+                  vm[at::NO_PROGRESS].as<bool>());
+  if (r < 0) {
+    std::cerr << "rbd: failed to create snapshot: " << cpp_strerror(r)
+              << std::endl;
+    return r;
+  }
+
+  /* protect the snap */
+  bool is_protected = false;
+  r = image.snap_is_protected(snap_name.c_str(), &is_protected);
+  if (r < 0) {
+    std::cerr << "rbd: protecting snap failed: " << cpp_strerror(r)
+              << std::endl;
+    return r;
+  } else if (is_protected) {
+    return 0;
+  }
+
+  r = do_protect_snap(image, snap_name.c_str());
+  if (r < 0) {
+    std::cerr << "rbd: protecting snap failed: " << cpp_strerror(r)
+              << std::endl;
+    return r;
+  }
+
+  /* clone from the snap */
+  librbd::ImageOptions opts;
+  r = utils::get_image_options(vm, false, &opts);
+  if (r < 0) {
+    return r;
+  }
+  opts.set(RBD_IMAGE_OPTION_FORMAT, static_cast<uint64_t>(2));
+
+  // duplicate 
+  // librados::Rados rados;
+  // librados::IoCtx io_ctx;
+  // r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  // if (r < 0) {
+  //   return r;
+  // }
+
+  librados::IoCtx dst_io_ctx;
+  r = utils::init_io_ctx(rados, pool_name, namespace_name, &dst_io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = do_clone(rbd, io_ctx, image_name.c_str(), snap_name.c_str(), dst_io_ctx,
+               dfork_name.c_str(), opts);
+  if (r == -EXDEV) {
+    std::cerr << "rbd: clone v2 required for cross-namespace clones."
+              << std::endl;
+    return r;
+  } else if (r < 0) {
+    std::cerr << "rbd: clone error: " << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
 void get_remove_arguments(po::options_description *positional,
                           po::options_description *options) {
   at::add_snap_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
@@ -709,7 +844,7 @@ int execute_check_dirty(const po::variables_map &vm,
 
 Shell::Action action_create(
   {"dfork", "create"}, {"dfork", "add"}, "dfork a disk image.", "",
-  &get_create_arguments, &execute_create);
+  &get_create_arguments, &execute_create_v2);
 Shell::Action action_remove(
   {"dfork", "remove"}, {"dfork", "rm"}, "remove a dfork-ed image.", "",
   &get_remove_arguments, &execute_remove);

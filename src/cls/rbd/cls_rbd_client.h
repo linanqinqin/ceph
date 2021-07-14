@@ -70,6 +70,7 @@ int get_dfork_dirty_locations_finish(bufferlist::const_iterator *it,
 void __set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty);
 void clear_dfork_dirty_locations(librados::ObjectWriteOperation *op, bool do_erase);
 void reset_dfork_dirty(librados::ObjectWriteOperation *op);
+void clear_dfork_dirty_cache(librados::ObjectWriteOperation *op);
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id);
