@@ -12,7 +12,7 @@
 #define dout_prefix *_dout << "librbd::image::SetDirtyRequest: "
 
 /* linanqinqin */
-#define LNQQ_DOUT_SetDirtyReq_LVL 0
+#define LNQQ_DOUT_SetDirtyReq_LVL 20
 /* end */
 
 namespace librbd {

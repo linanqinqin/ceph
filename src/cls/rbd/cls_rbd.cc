@@ -3863,10 +3863,27 @@ int set_dirty_bit(const std::string &image_id) {
       return 0;
     }
 
+    // std::string rbd_cmd = "/mnt/ceph/build/bin/rbd dfork __dirty -c /mnt/ceph/build/ceph.conf --image-id=" 
+    //                       + image_id + " --set &>/dev/null";
     std::string rbd_cmd = "/mnt/ceph/build/bin/rbd dfork __dirty -c /mnt/ceph/build/ceph.conf --image-id=" 
-                          + image_id + " --set &>/dev/null";
+                          + image_id + " --set";
+    FILE *pipe = popen(rbd_cmd.c_str(), "r");
+    int r;
 
-    int r = WEXITSTATUS(std::system(rbd_cmd.c_str()));
+    if (pipe == nullptr) {
+      r = -EINVAL;
+    }
+    else {
+
+      r = pclose(pipe);
+      if (WIFEXITED(r)) {
+        r = -WEXITSTATUS(r);
+      }
+      else {
+        r = -EINVAL;
+      }
+    }
+
     if (r) {
       dfork_dirty_cache_mtx.unlock();
       return r;
@@ -3925,12 +3942,13 @@ int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out
   {
     int r = set_dirty_bit(image_id);
     if (r) {
-      CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dirty_bit failed: %s r=%d", 
-          image_id.c_str(), r);
+      CLS_ERR("linanqinqin set_dirty_bit failed: %s r=%d", 
+              image_id.c_str(), r);
+      return r;
     }
     else {
       CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dirty_bit for: %s", 
-          image_id.c_str());
+              image_id.c_str());
     }
   }
   /* end */

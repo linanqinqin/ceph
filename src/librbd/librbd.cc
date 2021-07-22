@@ -48,7 +48,7 @@
 #include <vector>
 
 /* linanqinqin */
-#define LNQQ_DOUT_librbd_LVL 0
+#define LNQQ_DOUT_librbd_LVL 20
 /* end */
 
 #ifdef WITH_LTTNG
@@ -752,7 +752,7 @@ namespace librbd {
 		   ImageOptions& opts)
   {
     /* linanqinqin */
-    ldout((CephContext *)io_ctx.cct(), LNQQ_DOUT_librbd_LVL) << this << " " << __func__ << dendl;
+    // ldout((CephContext *)io_ctx.cct(), LNQQ_DOUT_librbd_LVL) << this << " " << __func__ << dendl;
     /* end */
     TracepointProvider::initialize<tracepoint_traits>(get_cct(io_ctx));
     tracepoint(librbd, create4_enter, io_ctx.get_pool_name().c_str(), io_ctx.get_id(), name, size, opts.opts);

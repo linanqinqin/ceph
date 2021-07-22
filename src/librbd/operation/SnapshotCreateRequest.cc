@@ -219,13 +219,6 @@ void SnapshotCreateRequest<I>::send_clear_dirty_bit_cache() {
   CephContext *cct = image_ctx.cct;
   ldout(cct, 5) << this << " " << __func__ << dendl;
 
-  // if (image_ctx.old_format) {
-  //   lderr(cct) << "old format not supported for dfork: " // << cpp_strerror(*result)
-  //              << dendl;
-  //   // save_result(result);
-  //   return send_notify_unquiesce();
-  // }
-
   librados::ObjectWriteOperation op;
   cls_client::clear_dfork_dirty_cache(&op);
 
@@ -488,9 +481,11 @@ Context *SnapshotCreateRequest<I>::send_notify_unquiesce() {
   I &image_ctx = this->m_image_ctx;
   CephContext *cct = image_ctx.cct;
 
+  /* original */
   if (m_writes_blocked) {
     image_ctx.io_image_dispatcher->unblock_writes();
   }
+  /* end */
 
   if (m_skip_notify_quiesce) {
     return this->create_context_finisher(m_ret_val);
