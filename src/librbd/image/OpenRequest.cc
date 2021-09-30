@@ -17,6 +17,10 @@
 #include "librbd/io/SimpleSchedulerObjectDispatch.h"
 #include <boost/algorithm/string/predicate.hpp>
 #include "include/ceph_assert.h"
+/* linanqinqin */
+#include "librbd/ObjectMap.h"
+#include "common/bit_vector.hpp"
+/* end */
 
 #define dout_subsys ceph_subsys_rbd
 #undef dout_prefix
@@ -24,6 +28,10 @@
 
 /* linanqinqin */
 #define LNQQ_DOUT_OpenReq_LVL 100
+/* end */
+
+/* linanqinqin */
+// namespace ceph { template <uint8_t> class BitVector; }
 /* end */
 
 namespace librbd {
@@ -269,7 +277,7 @@ void OpenRequest<I>::send_v2_get_initial_metadata() {
   librados::ObjectReadOperation op;
   cls_client::get_size_start(&op, CEPH_NOSNAP);
   /* linanqinqin */
-  cls_client::get_dfork_dirty_start(&op);
+  // cls_client::get_dfork_dirty_start(&op);
   /* end */
   cls_client::get_object_prefix_start(&op);
   cls_client::get_features_start(&op, true);
@@ -304,10 +312,15 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
   /* end */
   
   /* linanqinqin */
-  if (*result >= 0) {
-    *result = cls_client::get_dfork_dirty_finish(&it, &m_image_ctx->dirty);
-  }
+  // if (*result >= 0) {
+  //   *result = cls_client::get_dfork_dirty_finish(&it, &m_image_ctx->dirty);
+  // }
   // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << ":" << (int)m_image_ctx->dirty << dendl;
+  
+  // if (*result >= 0) {
+  //   ceph::BitVector<2> object_map;
+  //   *result = cls_client::object_map_load_finish(&it, &object_map);
+  // }
   /* end */
 
   if (*result >= 0) {
@@ -330,6 +343,18 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
 
   /* linanqinqin */
   // send_set_dfork_dirty();
+  if (v3_get_dirty_bit()) {
+    lderr(cct) << "failed to retrieve the dirty bit: "
+               << cpp_strerror(*result) << dendl;
+    send_close_image(*result);
+    return nullptr;
+  }
+  // if (get_object_map()) {
+  //   lderr(cct) << "failed to read the object map: "
+  //              << cpp_strerror(*result) << dendl;
+  //   send_close_image(*result);
+  //   return nullptr;
+  // }
   /* end */
 
   if (m_image_ctx->test_features(RBD_FEATURE_STRIPINGV2)) {
@@ -340,6 +365,31 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
 
   return nullptr;
 }
+
+/* linanqinqin */
+template <typename I>
+int OpenRequest<I>::get_object_map() {
+  // CephContext *cct = m_image_ctx->cct;
+  // ldout(cct, LNQQ_DOUT_OpenReq_LVL) << __func__ << dendl;
+
+  ceph::BitVector<2> object_map;
+  int r = cls_client::object_map_load(&(m_image_ctx->md_ctx), 
+                                      "rbd_object_map."+m_image_ctx->id, 
+                                      &object_map);
+
+  std::string objmap_str;
+  auto it = object_map.begin();
+  auto end_it = object_map.end();
+  for (; it != end_it; ++it) {
+    objmap_str += *it+'0';
+  }
+
+  std::cout << "linanqinqin object_map for " << m_image_ctx->id << ": " 
+            << objmap_str << std::endl;
+
+  return r;
+}
+/* end */
 
 /* linanqinqin */
 // template <typename I>
@@ -374,6 +424,50 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
 
 //   return nullptr;
 // }
+
+template <typename I>
+void OpenRequest<I>::send_v3_get_dirty_bit() {
+  CephContext *cct = m_image_ctx->cct;
+  ldout(cct, 10) << this << " " << __func__ << dendl;
+
+  librados::ObjectReadOperation op;
+  cls_client::get_dirty_bit_v3_start(&op);
+
+  using klass = OpenRequest<I>;
+  librados::AioCompletion *comp =
+    create_rados_callback<klass, &klass::handle_v3_get_dirty_bit>(this);
+  m_out_bl.clear();
+  int r = m_image_ctx->md_ctx.aio_operate("rbd_object_map."+m_image_ctx->id, comp, &op,
+                                          &m_out_bl);
+  ceph_assert(r == 0);
+  comp->release();
+}
+
+template <typename I>
+Context *OpenRequest<I>::handle_v3_get_dirty_bit(int *result) {
+  CephContext *cct = m_image_ctx->cct;
+  ldout(cct, 10) << __func__ << ": r=" << *result << dendl;
+
+  auto it = m_out_bl.cbegin();
+  if (*result >= 0) {
+    *result = cls_client::get_dirty_bit_v3_finish(&it, &m_image_ctx->dirty);
+  }
+
+  if (*result < 0) {
+    lderr(cct) << "failed to retrieve the dirty bit: "
+               << cpp_strerror(*result) << dendl;
+    // send_close_image(*result);
+  }
+  return nullptr;
+}
+
+template <typename I>
+int OpenRequest<I>::v3_get_dirty_bit() {
+
+  return cls_client::get_dirty_bit_v3(&(m_image_ctx->md_ctx), 
+                                      ObjectMap<>::object_map_name(m_image_ctx->id, CEPH_NOSNAP), 
+                                      &m_image_ctx->dirty);
+}
 /* end */
 
 template <typename I>

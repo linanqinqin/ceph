@@ -6,6 +6,7 @@
 #include "common/errno.h"
 #include "cls/rbd/cls_rbd_client.h"
 #include "librbd/Utils.h"
+#include "librbd/ObjectMap.h"
 
 #define dout_subsys ceph_subsys_rbd
 #undef dout_prefix
@@ -86,17 +87,33 @@ template <typename I>
 void UnblockDirtyRequest<I>::send_unblock_dfork_dirty() {
   ldout(m_cct, LNQQ_DOUT_UnblockDirtyReq_LVL) << __func__ << dendl;
 
+  /* v2 dirty bit */
+  // librados::ObjectWriteOperation op;
+  // cls_client::unblock_dfork_dirty(&op);
+
+  // using klass = UnblockDirtyRequest<I>;
+  // librados::AioCompletion *comp =
+  //   create_rados_callback<klass, &klass::handle_unblock_dfork_dirty>(this);
+  
+  // m_header_obj = util::header_name(m_image_id);
+  // int r = m_io_ctx.aio_operate(m_header_obj, comp, &op);
+  // ceph_assert(r == 0);
+  // comp->release();
+  /* v2 dirty bit end */
+
+  /* v3 dirty bit */
   librados::ObjectWriteOperation op;
-  cls_client::unblock_dfork_dirty(&op);
+  cls_client::unblock_dirty_bit_updates_v3(&op);
 
   using klass = UnblockDirtyRequest<I>;
   librados::AioCompletion *comp =
     create_rados_callback<klass, &klass::handle_unblock_dfork_dirty>(this);
   
-  m_header_obj = util::header_name(m_image_id);
-  int r = m_io_ctx.aio_operate(m_header_obj, comp, &op);
+  std::string omap_oid(ObjectMap<>::object_map_name(m_image_id, CEPH_NOSNAP));
+  int r = m_io_ctx.aio_operate(omap_oid, comp, &op);
   ceph_assert(r == 0);
   comp->release();
+  /* v3 dirty bit end */
 }
 
 template <typename I>

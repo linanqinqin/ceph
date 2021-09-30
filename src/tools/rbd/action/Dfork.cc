@@ -851,9 +851,9 @@ Shell::Action action_remove(
 Shell::Action action_check_dirty(
   {"dfork", "dirty"}, {}, "Check the dfork dirty bit of an image", "",
   &get_check_dirty_arguments, &execute_check_dirty);
-Shell::Action action_set_dirty(
-  {"dfork", "__dirty"}, {}, "Set the dfork dirty bit (for internal use)", "",
-  &get_set_dirty_arguments, &execute_set_dirty);
+// Shell::Action action_set_dirty(
+//   {"dfork", "__dirty"}, {}, "Set the dfork dirty bit (for internal use)", "",
+//   &get_set_dirty_arguments, &execute_set_dirty);
 
 } // namespace dfork
 } // namespace action

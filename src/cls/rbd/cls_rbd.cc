@@ -45,7 +45,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 
 /* linanqinqin */
-#define LNQQ_DOUT_cls_rbd_LVL 100
+#define LNQQ_DOUT_cls_rbd_LVL 0
 /* end */
 
 using std::istringstream;
@@ -750,6 +750,96 @@ int detach(cls_method_context_t hctx, bool legacy_api) {
 } // namespace parent
 } // namespace image
 
+/* linanqinqin */
+/** 
+ * v3 version of the dirty bit mechanism.
+ * 
+ * - Data structure: this version uses a std::map structure in each OSD daemon.
+ * For each pair, the key is the image id in std::string while the value is 
+ * the dirty bit in uint8_t.
+ * 
+ * - Setting the dirty bit: still uses object_map_update as the central point 
+ * for first-time writes to all objects. For every object_map_update invocation, 
+ * the corresponding entry is set to true. If none, create one.
+ *
+ * - Unsetting the dirty bit: The should only happen when an image is being 
+ * created/dforked: simply set the entry to false (the parent, when dforking); 
+ * If none, create one (the child, when dforking, or creating a brand new image).
+ * The central point is create().
+ *
+ * - 
+ */
+
+std::map<std::string, uint8_t> dfork_dirty_map;   // records dirty bits
+std::set<std::string> dfork_dirty_block_set_v3;   // records dirty bit update blocking
+std::mutex dfork_dirty_map_mtx;   // protects the two data structures above
+
+// Set the dirty bit entry in the map, if none, the entry will be created
+// This function should only be used in object_map_update()
+int set_dirty_bit_v3(const std::string &image_id) {
+
+  auto entry = dfork_dirty_map.find(image_id);
+
+  if (entry != dfork_dirty_map.end()) {
+    if ((uint8_t)(entry->second) == cls::rbd::DFORK_DIRTY_BIT_DIRTY) {
+      // already dirty
+      return 0;
+    }
+  }
+
+  dfork_dirty_map_mtx.lock();
+
+  entry = dfork_dirty_map.find(image_id);
+
+  // check again
+  if (entry != dfork_dirty_map.end()) {
+    // cache hit
+    if ((uint8_t)(entry->second) == cls::rbd::DFORK_DIRTY_BIT_DIRTY) {
+      // already dirty
+      dfork_dirty_map_mtx.unlock();
+      return 0;
+    }
+    else {
+      // clean
+      if (dfork_dirty_block_set_v3.find(image_id) != dfork_dirty_block_set_v3.end()) {
+        // cache hit, clean, and needs to be blocked
+        dfork_dirty_map_mtx.unlock();
+        return -EPERM;
+      }
+      else {
+        // cache hit, clean, can be set dirty
+        entry->second = cls::rbd::DFORK_DIRTY_BIT_DIRTY;
+        // dfork_dirty_map[image_id] = cls::rbd::DFORK_DIRTY_BIT_DIRTY;
+        dfork_dirty_map_mtx.unlock();
+        return 0;
+      }
+    }
+  }
+  else {
+    // if cache miss, this update must not have been blocked, we can directly update
+    // (because blocking dirty bit updates requires check_dirty_bit_v3, which takes 
+    // care of cache miss)
+    dfork_dirty_map[image_id] = cls::rbd::DFORK_DIRTY_BIT_DIRTY;
+    dfork_dirty_map_mtx.unlock();
+    return 0;
+  }
+}
+
+// Unset the dirty bit entry in the map, if none, the entry will be created
+// This function should only be used in object_map_snap_add()
+void clear_dirty_bit_v3(const std::string &image_id) {
+
+  dfork_dirty_map_mtx.lock();
+  dfork_dirty_map[image_id] = cls::rbd::DFORK_DIRTY_BIT_CLEAN;
+  dfork_dirty_map_mtx.unlock();
+}
+
+// remove the dirty bit entry from the map
+void remove_dirty_bit_v3(const std::string &image_id) {
+  dfork_dirty_map.erase(image_id);
+}
+/* end */
+
 /**
  * Initialize the header with basic metadata.
  * Extra features may initialize more fields in the future.
@@ -771,7 +861,7 @@ int detach(cls_method_context_t hctx, bool legacy_api) {
 int create(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   /* linanqinqin */
-  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin: %s", __func__);
+  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin: %s", __func__);
   /* end */
   string object_prefix;
   uint64_t features, size;
@@ -836,6 +926,11 @@ int create(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   omap_vals["modify_timestamp"] = timestampbl;
 
   /* linanqinqin */
+  /**
+   * For v1 and v2 versions of dirty bit.
+   * dfork_dirty_locations is only for v1 dirty bit for tracking the OSDs that 
+   * have cached the dirty bit.
+   */
   uint8_t dirty = 0;
   std::string dirty_locations;
 
@@ -847,6 +942,16 @@ int create(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   omap_vals["dfork_dirty"] = dirtybl;
   omap_vals["dfork_dirty_locations"] = dirty_locbl;
+  /* end */
+
+  /* linanqinqin */
+  /**
+   * v3 version of the dirty bit.
+   * the entry is created here.
+   * THIS DOES NOT WORK! The method belongs to the header object, not object_map object. 
+   */
+  // std::string image_id = cls_get_target_rbd_image_name(hctx);
+  // dfork_dirty_map[image_id] = false;
   /* end */
 
   if ((features & RBD_FEATURE_OPERATIONS) != 0ULL) {
@@ -3863,27 +3968,31 @@ int set_dirty_bit(const std::string &image_id) {
       return 0;
     }
 
+    // This does not work, due to the redirection (why?)
     // std::string rbd_cmd = "/mnt/ceph/build/bin/rbd dfork __dirty -c /mnt/ceph/build/ceph.conf --image-id=" 
     //                       + image_id + " --set &>/dev/null";
-    std::string rbd_cmd = "/mnt/ceph/build/bin/rbd dfork __dirty -c /mnt/ceph/build/ceph.conf --image-id=" 
-                          + image_id + " --set";
-    FILE *pipe = popen(rbd_cmd.c_str(), "r");
-    int r;
 
-    if (pipe == nullptr) {
-      r = -EINVAL;
-    }
-    else {
+    // Below we directly call rbd, which may cause the double-lock issue
+    // std::string rbd_cmd = "/mnt/ceph/build/bin/rbd dfork __dirty -c /mnt/ceph/build/ceph.conf --image-id=" 
+    //                       + image_id + " --set";
+    // FILE *pipe = popen(rbd_cmd.c_str(), "r");
+    // int r;
 
-      r = pclose(pipe);
-      if (WIFEXITED(r)) {
-        r = -WEXITSTATUS(r);
-      }
-      else {
-        r = -EINVAL;
-      }
-    }
+    // if (pipe == nullptr) {
+    //   r = -EINVAL;
+    // }
+    // else {
 
+    //   r = pclose(pipe);
+    //   if (WIFEXITED(r)) {
+    //     r = -WEXITSTATUS(r);
+    //   }
+    //   else {
+    //     r = -EINVAL;
+    //   }
+    // }
+
+    int r = 0;
     if (r) {
       dfork_dirty_cache_mtx.unlock();
       return r;
@@ -3919,6 +4028,164 @@ int clear_dfork_dirty_cache(cls_method_context_t hctx, bufferlist *in, bufferlis
 }
 /* end */
 
+/* linanqinqin */
+/**
+ * (v3) Get the dirty bit for a given image.
+ * this method is tracked by rbd_object_map.$image_id
+ *
+ * Input:
+ * None
+ *
+ * Output:
+ * @param dirty_bit the dirty bit value of the image (uint8_t)
+ * @return 0 on success, negative error code on failure
+ */
+int get_dirty_bit_v3(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  std::string image_id = cls_get_target_rbd_image_name(hctx);
+
+  dfork_dirty_map_mtx.lock();
+  auto entry = dfork_dirty_map.find(image_id);
+
+  if (entry == dfork_dirty_map.end()) {
+    // cache miss: the cluster/OSD is restarted etc.
+
+    BitVector<2> object_map;
+    int r = object_map_read(hctx, object_map);
+    if (r < 0) {
+      dfork_dirty_map_mtx.unlock();
+      return r;
+    }
+
+    uint8_t is_dirty = cls::rbd::DFORK_DIRTY_BIT_CLEAN;
+    auto it = object_map.begin();
+    auto end_it = object_map.end();
+    for (; it != end_it; ++it) {
+      if (*it == OBJECT_EXISTS || *it == OBJECT_PENDING) {
+        is_dirty = cls::rbd::DFORK_DIRTY_BIT_DIRTY;
+        break;
+      }
+    }
+
+    dfork_dirty_map[image_id] = is_dirty;
+    dfork_dirty_map_mtx.unlock();
+
+    // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s(cache miss) %s: %d", __func__, 
+    //         image_id.c_str(), is_dirty);
+
+    encode(is_dirty, *out);
+
+    return 0;
+  }
+  else {
+    // cache hit (most cases)
+
+    dfork_dirty_map_mtx.unlock();
+
+    // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s(cache hit) %s: %d", __func__, 
+    //         entry->first.c_str(), entry->second);
+
+    encode(entry->second, *out);
+    
+    return 0;
+  }
+
+}
+
+/**
+ * (v3) Check the dirty bit for a given image.
+ * this method is tracked by rbd_object_map.$image_id
+ * If block_on_clean is true, updates to the given image's dirty bit will be 
+ * blocked if dirty bit is clean, which further blocks all writes.
+ *
+ * Input:
+ * @param block_on_clean block writes if clean (bool)
+ *
+ * Output:
+ * @param dirty_bit the dirty bit value of the image (uint8_t)
+ * @return 0 on success, negative error code on failure
+ */
+int check_dirty_bit_v3(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  bool block_on_clean;
+  uint8_t dirty_bit = cls::rbd::DFORK_DIRTY_BIT_CLEAN;
+  std::string image_id = cls_get_target_rbd_image_name(hctx);
+
+  // taking input
+  auto iter = in->cbegin();
+  try {
+    decode(block_on_clean, iter);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+
+  dfork_dirty_map_mtx.lock();
+  auto entry = dfork_dirty_map.find(image_id);
+
+  if (entry == dfork_dirty_map.end()) {
+    // cache miss: the cluster/OSD is restarted etc.
+
+    BitVector<2> object_map;
+    int r = object_map_read(hctx, object_map);
+    if (r < 0) {
+      dfork_dirty_map_mtx.unlock();
+      return r;
+    }
+
+    auto it = object_map.begin();
+    auto end_it = object_map.end();
+    for (; it != end_it; ++it) {
+      if (*it == OBJECT_EXISTS || *it == OBJECT_PENDING) {
+        dirty_bit = cls::rbd::DFORK_DIRTY_BIT_DIRTY;
+        break;
+      }
+    }
+
+    dfork_dirty_map[image_id] = dirty_bit;
+  }
+  else {
+    // cache hit (most cases)
+
+    dirty_bit = entry->second;
+  }
+
+  if (block_on_clean && (dirty_bit == cls::rbd::DFORK_DIRTY_BIT_CLEAN)) {
+    // block on clean
+
+    dfork_dirty_block_set_v3.insert(image_id);
+  }
+  dfork_dirty_map_mtx.unlock();
+
+  encode(dirty_bit, *out);
+
+  return 0;
+}
+
+/**
+ * (v3) Unblock dirty bit updates for a given image.
+ * this method is tracked by rbd_object_map.$image_id
+ *
+ * Input:
+ * None
+ *
+ * Output:
+ * @return 0 on success, negative error code on failure
+ */
+int unblock_dirty_bit_updates_v3(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  std::string image_id = cls_get_target_rbd_image_name(hctx);
+
+  dfork_dirty_map_mtx.lock();
+  dfork_dirty_block_set_v3.erase(image_id);
+  dfork_dirty_map_mtx.unlock();
+
+  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s: %s unblocked", 
+          __func__, image_id.c_str());
+
+  return 0;
+}
+/* end */
+
 /**
  * Update an rbd image's object map
  *
@@ -3936,18 +4203,33 @@ int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out
   /* linanqinqin */
   std::string image_id = cls_get_target_rbd_image_name(hctx);
 
-  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
-          image_id.c_str());
+  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
+  //         image_id.c_str());
 
+  // v2 dirty bit
+  // {
+  //   int r = set_dirty_bit(image_id);
+  //   if (r) {
+  //     CLS_ERR("linanqinqin set_dirty_bit failed: %s r=%d", 
+  //             image_id.c_str(), r);
+  //     return r;
+  //   }
+  //   else {
+  //     CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dirty_bit for: %s", 
+  //             image_id.c_str());
+  //   }
+  // }
+
+  // v3 dirty bit
   {
-    int r = set_dirty_bit(image_id);
+    int r = set_dirty_bit_v3(image_id);
     if (r) {
-      CLS_ERR("linanqinqin set_dirty_bit failed: %s r=%d", 
+      CLS_ERR("linanqinqin set_dirty_bit_v3 failed: %s r=%d", 
               image_id.c_str(), r);
       return r;
     }
     else {
-      CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dirty_bit for: %s", 
+      CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dirty_bit_v3 for: %s", 
               image_id.c_str());
     }
   }
@@ -4115,6 +4397,10 @@ int object_map_snap_add(cls_method_context_t hctx, bufferlist *in,
   //         cls_get_target_oid_name(hctx).c_str());
   /* end */
 
+  /* linanqinqin */
+  clear_dirty_bit_v3(cls_get_target_rbd_image_name(hctx));
+  /* end */
+
   BitVector<2> object_map;
   int r = object_map_read(hctx, object_map);
   if (r < 0) {
@@ -4124,12 +4410,23 @@ int object_map_snap_add(cls_method_context_t hctx, bufferlist *in,
   bool updated = false;
   auto it = object_map.begin();
   auto end_it = object_map.end();
+  /* linanqinqin */
+  // int obj_count = 0;
+  /* end */
   for (; it != end_it; ++it) {
     if (*it == OBJECT_EXISTS) {
       *it = OBJECT_EXISTS_CLEAN;
       updated = true;
     }
+    /* linanqinqin */
+    // obj_count += 1;
+    /* end */
   }
+
+  /* linanqinqin */
+  // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s object count: %d", __func__, 
+  //         cls_get_target_oid_name(hctx).c_str(), obj_count);
+  /* end */
 
   if (updated) {
     bufferlist bl;
@@ -4154,7 +4451,7 @@ int object_map_snap_remove(cls_method_context_t hctx, bufferlist *in,
 {
   /* linanqinqin */
   // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
-  //         cls_get_target_oid_name(hctx).c_str());
+  //         cls_get_target_rbd_image_name(hctx).c_str());
   /* end */
 
   BitVector<2> src_object_map;
@@ -8586,6 +8883,11 @@ CLS_INIT(rbd)
   cls_method_handle_t h_clear_dfork_dirty_locations;
   cls_method_handle_t h_reset_dfork_dirty;  // old method for clearing the dirty cache
   cls_method_handle_t h_clear_dfork_dirty_cache;  // new method for clearing the dirty cache
+  
+  // v3 dirty bit
+  cls_method_handle_t h_get_dirty_bit_v3;
+  cls_method_handle_t h_check_dirty_bit_v3;
+  cls_method_handle_t h_unblock_dirty_bit_updates_v3;
   /* end */
   cls_method_handle_t h_get_parent;
   cls_method_handle_t h_set_parent;
@@ -8757,6 +9059,17 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "clear_dfork_dirty_cache",
         CLS_METHOD_WR,
         clear_dfork_dirty_cache, &h_clear_dfork_dirty_cache);
+
+  //v3 dirty bit
+  cls_register_cxx_method(h_class, "get_dirty_bit_v3",
+                          CLS_METHOD_RD,
+                          get_dirty_bit_v3, &h_get_dirty_bit_v3);
+  cls_register_cxx_method(h_class, "check_dirty_bit_v3",
+                          CLS_METHOD_RD,
+                          check_dirty_bit_v3, &h_check_dirty_bit_v3);
+  cls_register_cxx_method(h_class, "unblock_dirty_bit_updates_v3",
+                          CLS_METHOD_WR,
+                          unblock_dirty_bit_updates_v3, &h_unblock_dirty_bit_updates_v3);
   /* end */
   cls_register_cxx_method(h_class, "get_snapcontext",
 			  CLS_METHOD_RD,

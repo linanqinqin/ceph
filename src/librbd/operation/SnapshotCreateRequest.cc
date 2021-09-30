@@ -203,11 +203,15 @@ Context *SnapshotCreateRequest<I>::handle_append_op_event(int *result) {
     return send_notify_unquiesce();
   }
 
-  /* original 
+  /* original */
+  // For v3 dirty bit, clearing the dirty bit is done along with object_map create
+  // This should be safe as well since the whole workflow is protected by block_writes
   send_allocate_snap_id();
-     end */
+  /* end */
+  
   /* linanqinqin */
-  send_clear_dirty_bit_cache();
+  // For v2 dirty bit
+  // send_clear_dirty_bit_cache();
   /* end */
   return nullptr;
 }

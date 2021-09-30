@@ -296,6 +296,58 @@ void clear_dfork_dirty_cache(librados::ObjectWriteOperation *op) {
   bufferlist bl;
   op->exec("rbd", "clear_dfork_dirty_cache", bl);
 }
+
+// v3 dirty bit
+void get_dirty_bit_v3_start(librados::ObjectReadOperation *op) {
+  bufferlist bl;
+  op->exec("rbd", "get_dirty_bit_v3", bl);
+}
+
+int get_dirty_bit_v3_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
+  try {
+    decode(*dirty, *it);
+  } catch (const ceph::buffer::error &err) {
+    return -EBADMSG;
+  }
+  return 0;
+}
+
+int get_dirty_bit_v3(librados::IoCtx *ioctx, const std::string &oid,
+                     uint8_t *dirty)
+{
+  librados::ObjectReadOperation op;
+  get_dirty_bit_v3_start(&op);
+
+  bufferlist out_bl;
+  int r = ioctx->operate(oid, &op, &out_bl);
+  if (r < 0) {
+    return r;
+  }
+
+  auto it = out_bl.cbegin();
+  return get_dirty_bit_v3_finish(&it, dirty);
+}
+
+void check_dirty_bit_v3_start(librados::ObjectReadOperation *op, bool block) {
+
+  bufferlist bl;
+  encode(block, bl);
+  op->exec("rbd", "check_dirty_bit_v3", bl);
+}
+
+int check_dirty_bit_v3_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
+  try {
+    decode(*dirty, *it);
+  } catch (const ceph::buffer::error &err) {
+    return -EBADMSG;
+  }
+  return 0;
+}
+
+void unblock_dirty_bit_updates_v3(librados::ObjectWriteOperation *op) {
+  bufferlist bl;
+  op->exec("rbd", "unblock_dirty_bit_updates_v3", bl);
+}
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id) {

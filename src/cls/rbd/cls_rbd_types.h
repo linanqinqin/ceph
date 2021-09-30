@@ -22,6 +22,13 @@ namespace ceph { class Formatter; }
 namespace cls {
 namespace rbd {
 
+/* linanqinqin */
+enum DforkDirtyBitState {
+  DFORK_DIRTY_BIT_CLEAN = 0,
+  DFORK_DIRTY_BIT_DIRTY = 1
+};
+/* end */
+
 static const uint32_t MAX_OBJECT_MAP_OBJECT_COUNT = 256000000;
 static const std::string RBD_GROUP_IMAGE_KEY_PREFIX = "image_";
 

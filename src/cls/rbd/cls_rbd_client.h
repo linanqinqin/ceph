@@ -71,6 +71,14 @@ void __set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty);
 void clear_dfork_dirty_locations(librados::ObjectWriteOperation *op, bool do_erase);
 void reset_dfork_dirty(librados::ObjectWriteOperation *op);
 void clear_dfork_dirty_cache(librados::ObjectWriteOperation *op);
+
+// v3 dirty bit
+void get_dirty_bit_v3_start(librados::ObjectReadOperation *op);
+int get_dirty_bit_v3_finish(bufferlist::const_iterator *it, uint8_t *dirty);
+int get_dirty_bit_v3(librados::IoCtx *ioctx, const std::string &oid, uint8_t *dirty);
+void check_dirty_bit_v3_start(librados::ObjectReadOperation *op, bool block);
+int check_dirty_bit_v3_finish(bufferlist::const_iterator *it, uint8_t *dirty);
+void unblock_dirty_bit_updates_v3(librados::ObjectWriteOperation *op);
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id);
