@@ -260,7 +260,7 @@ public:
   // int check_dfork_dirty(IoCtx& io_ctx, Image& image, const char *name,
   //                       const char *id, bool block);
   int check_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id, 
-                        uint8_t *dirty, bool block);
+                        uint8_t *dirty, bool block, bool no_cache);
   int unblock_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id);
   int reset_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id);
   /* end */

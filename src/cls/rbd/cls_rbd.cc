@@ -45,7 +45,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 
 /* linanqinqin */
-#define LNQQ_DOUT_cls_rbd_LVL 20
+#define LNQQ_DOUT_cls_rbd_LVL 0
 /* end */
 
 using std::istringstream;
@@ -4100,6 +4100,8 @@ int get_dirty_bit_v3(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
  *
  * Input:
  * @param block_on_clean block writes if clean (bool)
+ * @param from_omap force check to construct dirty bit from object_map 
+ *        regardless of cache
  *
  * Output:
  * @param dirty_bit the dirty bit value of the image (uint8_t)
@@ -4108,6 +4110,7 @@ int get_dirty_bit_v3(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 int check_dirty_bit_v3(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
   bool block_on_clean;
+  bool from_omap;
   uint8_t dirty_bit = cls::rbd::DFORK_DIRTY_BIT_CLEAN;
   std::string image_id = cls_get_target_rbd_image_name(hctx);
 
@@ -4115,6 +4118,7 @@ int check_dirty_bit_v3(cls_method_context_t hctx, bufferlist *in, bufferlist *ou
   auto iter = in->cbegin();
   try {
     decode(block_on_clean, iter);
+    decode(from_omap, iter);
   } catch (const ceph::buffer::error &err) {
     return -EINVAL;
   }
@@ -4122,8 +4126,9 @@ int check_dirty_bit_v3(cls_method_context_t hctx, bufferlist *in, bufferlist *ou
   dfork_dirty_map_mtx.lock();
   auto entry = dfork_dirty_map.find(image_id);
 
-  if (entry == dfork_dirty_map.end()) {
+  if (from_omap || (entry == dfork_dirty_map.end())) {
     // cache miss: the cluster/OSD is restarted etc.
+    // or forced to construct from omap
 
     BitVector<2> object_map;
     int r = object_map_read(hctx, object_map);

@@ -328,10 +328,11 @@ int get_dirty_bit_v3(librados::IoCtx *ioctx, const std::string &oid,
   return get_dirty_bit_v3_finish(&it, dirty);
 }
 
-void check_dirty_bit_v3_start(librados::ObjectReadOperation *op, bool block) {
+void check_dirty_bit_v3_start(librados::ObjectReadOperation *op, bool block, bool from_omap) {
 
   bufferlist bl;
   encode(block, bl);
+  encode(from_omap, bl);
   op->exec("rbd", "check_dirty_bit_v3", bl);
 }
 

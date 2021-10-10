@@ -76,7 +76,8 @@ void clear_dfork_dirty_cache(librados::ObjectWriteOperation *op);
 void get_dirty_bit_v3_start(librados::ObjectReadOperation *op);
 int get_dirty_bit_v3_finish(bufferlist::const_iterator *it, uint8_t *dirty);
 int get_dirty_bit_v3(librados::IoCtx *ioctx, const std::string &oid, uint8_t *dirty);
-void check_dirty_bit_v3_start(librados::ObjectReadOperation *op, bool block);
+void check_dirty_bit_v3_start(librados::ObjectReadOperation *op, bool block, 
+                              bool from_omap);
 int check_dirty_bit_v3_finish(bufferlist::const_iterator *it, uint8_t *dirty);
 void unblock_dirty_bit_updates_v3(librados::ObjectWriteOperation *op);
 /* end */

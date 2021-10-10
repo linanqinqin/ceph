@@ -138,7 +138,8 @@ static int do_check_dfork_dirty(const std::string &pool_name,
                                 const std::string &image_name,
                                 const std::string &image_id,
                                 uint8_t *dirty,
-                                bool block_on_clean) {
+                                bool block_on_clean, 
+                                bool no_cache) {
   librados::Rados rados; 
   librados::IoCtx io_ctx;
   int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
@@ -148,7 +149,7 @@ static int do_check_dfork_dirty(const std::string &pool_name,
 
   librbd::RBD rbd;
   r = rbd.check_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str(), 
-                            dirty, block_on_clean);
+                            dirty, block_on_clean, no_cache);
   if (r < 0) {
     std::cerr << "rbd: error setting the dfork dirty bit: "
               << cpp_strerror(r) << std::endl;
@@ -758,6 +759,8 @@ void get_check_dirty_arguments(po::options_description *positional,
     ("block-on-clean", po::bool_switch(), "block dirty bit updates if the dirty bit is clean");
   options->add_options()
     ("unblock", po::bool_switch(), "unblock dirty bit updates");
+  options->add_options()
+    ("no-cache", po::bool_switch(), "bypass dirty bit cache");
 }
 
 int execute_check_dirty(const po::variables_map &vm,
@@ -770,6 +773,7 @@ int execute_check_dirty(const po::variables_map &vm,
   std::string image_id;
   bool block_on_clean;
   bool unblock;
+  bool no_cache;
 
   if (vm.count(at::IMAGE_ID)) {
     image_id = vm[at::IMAGE_ID].as<std::string>();
@@ -814,8 +818,9 @@ int execute_check_dirty(const po::variables_map &vm,
   else {
 
     uint8_t dirty;
+    no_cache = vm["no-cache"].as<bool>();
     r = do_check_dfork_dirty(pool_name, namespace_name, image_name, image_id,
-                             &dirty, block_on_clean);
+                             &dirty, block_on_clean, no_cache);
     if (r < 0) {
       std::cerr << "rbd: failed to check dfork dirty: " << cpp_strerror(r) 
                 << std::endl;
@@ -851,6 +856,7 @@ Shell::Action action_remove(
 Shell::Action action_check_dirty(
   {"dfork", "dirty"}, {}, "Check the dfork dirty bit of an image", "",
   &get_check_dirty_arguments, &execute_check_dirty);
+// Below is still with v2 dirty bit, no longer needed
 // Shell::Action action_set_dirty(
 //   {"dfork", "__dirty"}, {}, "Set the dfork dirty bit (for internal use)", "",
 //   &get_set_dirty_arguments, &execute_set_dirty);

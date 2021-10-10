@@ -534,9 +534,9 @@ namespace librbd {
   }
 
   int RBD::check_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id, 
-                             uint8_t *dirty, bool block) {
+                             uint8_t *dirty, bool block, bool no_cache) {
 
-    int r = librbd::check_dfork_dirty(io_ctx, name, id, dirty, block);
+    int r = librbd::check_dfork_dirty(io_ctx, name, id, dirty, block, no_cache);
     return r;
   }
 

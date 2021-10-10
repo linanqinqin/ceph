@@ -26,10 +26,12 @@ template <typename I>
 CheckDirtyRequest<I>::CheckDirtyRequest(IoCtx &ioctx, const std::string &image_name, 
                                         const std::string &image_id,
                                         uint8_t *dirty, bool block_on_clean, 
+                                        bool from_omap, 
                                         Context *on_finish)
   : m_image_name(image_name), m_image_id(image_id), 
     m_dirty(dirty), 
     m_block_on_clean(block_on_clean),
+    m_from_omap(from_omap),
     m_on_finish(on_finish), m_error_result(0) {
 
   m_io_ctx.dup(ioctx);
@@ -108,7 +110,7 @@ void CheckDirtyRequest<I>::send_check_dfork_dirty() {
 
   /* v3 dirty bit */
   librados::ObjectReadOperation op;
-  cls_client::check_dirty_bit_v3_start(&op, m_block_on_clean);
+  cls_client::check_dirty_bit_v3_start(&op, m_block_on_clean, m_from_omap);
 
   using klass = CheckDirtyRequest<I>;
   librados::AioCompletion *comp =

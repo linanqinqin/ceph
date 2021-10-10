@@ -906,12 +906,12 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
 
   int check_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 
                         const std::string &image_id, 
-                        uint8_t *dirty, bool block) {
+                        uint8_t *dirty, bool block, bool no_cache) {
 
     C_SaferCond cond;
     image::CheckDirtyRequest<> *req = image::CheckDirtyRequest<>::create(
                                       io_ctx, image_name, image_id, 
-                                      dirty, block, &cond);
+                                      dirty, block, no_cache, &cond);
     req->send();
     int r = cond.wait();
 

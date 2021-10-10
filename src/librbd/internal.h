@@ -90,7 +90,7 @@ namespace librbd {
   // int check_dfork_dirty(ImageCtx *ictx, bool block);
   int check_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 
                         const std::string &image_id, 
-                        uint8_t *dirty, bool block);
+                        uint8_t *dirty, bool block, bool no_cache);
   int unblock_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 
                           const std::string &image_id);
   int reset_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 

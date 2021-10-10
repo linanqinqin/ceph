@@ -24,9 +24,10 @@ public:
   static CheckDirtyRequest *create(IoCtx &ioctx, const std::string &image_name,
                                    const std::string &image_id,
                                    uint8_t *dirty, bool block_on_clean, 
+                                   bool from_omap,
                                    Context *on_finish) {
     return new CheckDirtyRequest(ioctx, image_name, image_id, 
-                                 dirty, block_on_clean, on_finish);
+                                 dirty, block_on_clean, from_omap, on_finish);
   }
 
   void send();
@@ -41,6 +42,7 @@ private:
   CheckDirtyRequest(IoCtx &ioctx, const std::string &image_name,
                     const std::string &image_id, 
                     uint8_t *dirty, bool block_on_clean, 
+                    bool from_omap, 
                     Context *on_finish);
 
   // ImageCtxT *m_image_ctx;
@@ -51,6 +53,7 @@ private:
 
   uint8_t *m_dirty;
   bool m_block_on_clean;
+  bool m_from_omap;
 
   Context *m_on_finish;
 
