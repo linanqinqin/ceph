@@ -45,7 +45,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 
 /* linanqinqin */
-#define LNQQ_DOUT_cls_rbd_LVL 0
+#define LNQQ_DOUT_cls_rbd_LVL 20
 /* end */
 
 using std::istringstream;
