@@ -349,6 +349,13 @@ void unblock_dirty_bit_updates_v3(librados::ObjectWriteOperation *op) {
   bufferlist bl;
   op->exec("rbd", "unblock_dirty_bit_updates_v3", bl);
 }
+
+void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, bool do_all) {
+  bufferlist bl;
+  encode(switch_on, bl);
+  encode(do_all, bl);
+  op->exec("rbd", "dfork_switch", bl);
+}
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id) {

@@ -49,6 +49,7 @@
 #include "librbd/image/SetDirtyRequest.h"
 #include "librbd/image/UnblockDirtyRequest.h"
 #include "librbd/image/ResetDirtyRequest.h"
+#include "librbd/image/DforkSwitchRequest.h"
 /* end */
 #include "librbd/image/Types.h"
 #include "librbd/io/AioCompletion.h"
@@ -947,6 +948,19 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     C_SaferCond cond;
     image::ResetDirtyRequest<> *req = image::ResetDirtyRequest<>::create(
                                       io_ctx, image_name, image_id, &cond);
+    req->send();
+    int r = cond.wait();
+
+    return r;
+  }
+
+  int dfork_switch(IoCtx& io_ctx, const std::string &image_name,
+                   const std::string &image_id, bool switch_on, bool do_all) {
+
+    C_SaferCond cond;
+    image::DforkSwitchRequest<> *req = image::DforkSwitchRequest<>::create(
+                                       io_ctx, image_name, image_id, 
+                                       switch_on, do_all, &cond);
     req->send();
     int r = cond.wait();
 

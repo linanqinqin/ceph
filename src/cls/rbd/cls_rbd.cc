@@ -45,7 +45,9 @@
 #include <boost/algorithm/string/predicate.hpp>
 
 /* linanqinqin */
-#define LNQQ_DOUT_cls_rbd_LVL 20
+// #include <chrono>
+#include <sys/stat.h>
+#define LNQQ_DOUT_cls_rbd_LVL 100
 /* end */
 
 using std::istringstream;
@@ -4189,6 +4191,97 @@ int unblock_dirty_bit_updates_v3(cls_method_context_t hctx, bufferlist *in, buff
 
   return 0;
 }
+
+/**
+ * Switch on/off the dfork mode for a given image
+ * Entries are written to /mnt/ceph/dfork/
+ *
+ * Input:
+ * @param switch_on switch on/off dfork mode for a specific image
+ *
+ * Output:
+ * @return 0 on success, negative error code on failure
+ */
+int dfork_switch(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  bool switch_on;
+  bool do_all;
+  int r;
+  const std::string image_id = cls_get_target_rbd_image_name(hctx);
+  const std::string entry_dir("/etc/ceph/dfork/");
+  const std::string entry_path(entry_dir + image_id);
+
+  // taking input
+  auto iter = in->cbegin();
+  try {
+    decode(switch_on, iter);
+    decode(do_all, iter);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+
+  if (switch_on && do_all) {
+    CLS_ERR("linanqinqin %s: switching on dfork mode for all images not supported", 
+            __func__);
+    return -EOPNOTSUPP;
+  }
+
+  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s: switching %s dfork mode for %s", 
+          __func__, switch_on?"on":"off", do_all?"all images":image_id.c_str());
+
+  if (!do_all) {
+    // check the existence of the image
+    uint64_t size;
+    r = read_key(hctx, "size", &size);
+    if (r < 0) {
+      CLS_ERR("linanqinqin %s: failed to switch on dfork mode for %s: %s", 
+              __func__, image_id.c_str(), cpp_strerror(r).c_str());
+      return r;
+    }
+  }
+
+  if (switch_on) {
+    const std::string cmd_str("touch " + entry_path);
+
+    std::system(cmd_str.c_str());
+
+    // verify the entry existence
+    struct stat __buf;
+    r = stat(entry_path.c_str(), &__buf);
+    if (r < 0) {
+      CLS_ERR("linanqinqin %s: failed to switch on dfork mode for %s: %s", 
+              __func__, image_id.c_str(), cpp_strerror(r).c_str());
+    }
+    return r;
+  }
+  else {
+    if (do_all) {
+      const std::string cmd_str("rm -f " + entry_dir + "*");
+
+      std::system(cmd_str.c_str());
+
+      // TODO: check results
+      return 0;
+    }
+    else {
+      const std::string cmd_str("rm -f " + entry_path);
+
+      std::system(cmd_str.c_str());
+
+      // verify the entry is gone
+      struct stat __buf;
+      r = stat(entry_path.c_str(), &__buf);
+      if (r == 0) {
+        CLS_ERR("linanqinqin %s: failed to switch on dfork mode for %s: failed to remove the entry", 
+                __func__, image_id.c_str());
+        return -EBUSY;
+      }
+      else {
+        return 0;
+      }
+    }
+  }
+}
 /* end */
 
 /**
@@ -4206,7 +4299,11 @@ int unblock_dirty_bit_updates_v3(cls_method_context_t hctx, bufferlist *in, buff
 int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   /* linanqinqin */
+  // auto time_started = std::chrono::duration_cast<std::chrono::microseconds>(
+  //   std::chrono::system_clock::now().time_since_epoch()).count();
+  // CLS_LOG(0, "linanqinqin object_map_update started %ld", time_started);
   std::string image_id = cls_get_target_rbd_image_name(hctx);
+  // auto time_started = std::chrono::system_clock::now();
 
   // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s %s", __func__, 
   //         image_id.c_str());
@@ -4381,6 +4478,14 @@ int object_map_update(cls_method_context_t hctx, bufferlist *in, bufferlist *out
     CLS_LOG(20, "object_map_update: no update necessary");
   }
 
+  /* linanqinqin */
+  // auto time_ended = std::chrono::system_clock::now();
+  // long us_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time_ended-time_started).count();
+  // CLS_LOG(0, "linanqinqin object_map_update elapsed %ld", us_elapsed);
+  // auto time_ended = std::chrono::duration_cast<std::chrono::microseconds>(
+  //   std::chrono::system_clock::now().time_since_epoch()).count();
+  // CLS_LOG(0, "linanqinqin object_map_update: %ld, %ld, %ld", time_started, time_ended, time_ended-time_started);
+  /* end */
   return 0;
 }
 
@@ -8893,6 +8998,9 @@ CLS_INIT(rbd)
   cls_method_handle_t h_get_dirty_bit_v3;
   cls_method_handle_t h_check_dirty_bit_v3;
   cls_method_handle_t h_unblock_dirty_bit_updates_v3;
+
+  // improved cow design
+  cls_method_handle_t h_dfork_switch;
   /* end */
   cls_method_handle_t h_get_parent;
   cls_method_handle_t h_set_parent;
@@ -9075,6 +9183,11 @@ CLS_INIT(rbd)
   cls_register_cxx_method(h_class, "unblock_dirty_bit_updates_v3",
                           CLS_METHOD_WR,
                           unblock_dirty_bit_updates_v3, &h_unblock_dirty_bit_updates_v3);
+  
+  // new cow design
+  cls_register_cxx_method(h_class, "dfork_switch",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          dfork_switch, &h_dfork_switch);
   /* end */
   cls_register_cxx_method(h_class, "get_snapcontext",
 			  CLS_METHOD_RD,

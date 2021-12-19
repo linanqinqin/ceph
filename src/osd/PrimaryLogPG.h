@@ -614,6 +614,14 @@ public:
     //pg_stat_t new_stats;  // resulting Stats
     object_stat_sum_t delta_stats;
 
+    /* linanqinqin */
+    bool is_cow;  // is COW write for a data object
+    bool is_parent_delete; // deleting a parent data object
+    std::string parent_oid_name;
+    std::string child_oid_name;
+    uint64_t parent_oi_size;
+    /* end */
+
     bool modify;          // (force) modification (even if op_t is empty)
     bool user_modify;     // user-visible modification
     bool undirty;         // user explicitly un-dirtying this object
@@ -724,6 +732,10 @@ public:
       obs(&obc->obs),
       snapset(0),
       new_obs(obs->oi, obs->exists),
+      /* linanqinqin */
+      is_cow(false),
+      is_parent_delete(false),
+      /* end */
       modify(false), user_modify(false), undirty(false), cache_operation(false),
       ignore_cache(false), ignore_log_op_stats(false), update_log_only(false),
       bytes_written(0), bytes_read(0), user_at_version(0),

@@ -123,8 +123,8 @@ static int do_set_dfork_dirty(const std::string &pool_name,
   }
 
   librbd::RBD rbd;
-  r = rbd.set_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str(), 
-                          dirty, location_oid.c_str());
+  r = rbd.set_dfork_dirty(io_ctx, image_name, image_id, 
+                          dirty, location_oid);
   if (r < 0) {
     std::cerr << "rbd: error setting the dfork dirty bit: "
               << cpp_strerror(r) << std::endl;
@@ -148,7 +148,7 @@ static int do_check_dfork_dirty(const std::string &pool_name,
   }
 
   librbd::RBD rbd;
-  r = rbd.check_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str(), 
+  r = rbd.check_dfork_dirty(io_ctx, image_name, image_id, 
                             dirty, block_on_clean, no_cache);
   if (r < 0) {
     std::cerr << "rbd: error setting the dfork dirty bit: "
@@ -194,7 +194,7 @@ static int do_unblock_dfork_dirty(const std::string &pool_name,
   }
 
   librbd::RBD rbd;
-  r = rbd.unblock_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str());
+  r = rbd.unblock_dfork_dirty(io_ctx, image_name, image_id);
   if (r < 0) {
     std::cerr << "rbd: error unblocking dfork dirty updates: "
               << cpp_strerror(r) << std::endl;
@@ -215,9 +215,32 @@ static int do_reset_dfork_dirty(const std::string &pool_name,
   }
 
   librbd::RBD rbd;
-  r = rbd.reset_dfork_dirty(io_ctx, image_name.c_str(), image_id.c_str());
+  r = rbd.reset_dfork_dirty(io_ctx, image_name, image_id);
   if (r < 0) {
     std::cerr << "rbd: error resetting dfork dirty: "
+              << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
+static int do_dfork_switch(const std::string &pool_name, 
+                           const std::string &namespace_name,  
+                           const std::string &image_name, 
+                           const std::string &image_id, 
+                           bool switch_on, 
+                           bool do_all) {
+  librados::Rados rados; 
+  librados::IoCtx io_ctx;
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = rbd.dfork_switch(io_ctx, image_name, image_id, switch_on, do_all);
+  if (r < 0) {
+    std::cerr << "rbd: error switching dfork mode: "
               << cpp_strerror(r) << std::endl;
     return r;
   }
@@ -733,8 +756,8 @@ int execute_set_dirty(const po::variables_map &vm,
   }
 
   if (is_reset) {
-    r = do_reset_dfork_dirty(pool_name.c_str(), namespace_name.c_str(), 
-                             image_name.c_str(), image_id.c_str());
+    r = do_reset_dfork_dirty(pool_name, namespace_name, 
+                             image_name, image_id);
   }
   else {
     std::string location_oid;
@@ -742,8 +765,8 @@ int execute_set_dirty(const po::variables_map &vm,
       location_oid = vm["loc-oid"].as<std::string>();
     }
 
-    r = do_set_dfork_dirty(pool_name.c_str(), namespace_name.c_str(), 
-                           image_name.c_str(), image_id.c_str(), 
+    r = do_set_dfork_dirty(pool_name, namespace_name, 
+                           image_name, image_id, 
                            is_set?1:0, location_oid);
   }
 
@@ -751,7 +774,7 @@ int execute_set_dirty(const po::variables_map &vm,
 }
 
 void get_check_dirty_arguments(po::options_description *positional,
-                   po::options_description *options) {
+                               po::options_description *options) {
   at::add_image_or_snap_spec_options(positional, options,
                                      at::ARGUMENT_MODIFIER_NONE);
   at::add_image_id_option(options);
@@ -764,7 +787,7 @@ void get_check_dirty_arguments(po::options_description *positional,
 }
 
 int execute_check_dirty(const po::variables_map &vm,
-            const std::vector<std::string> &ceph_global_init_args) {
+                        const std::vector<std::string> &ceph_global_init_args) {
   size_t arg_index = 0;
   std::string pool_name;
   std::string namespace_name;
@@ -847,6 +870,83 @@ int execute_check_dirty(const po::variables_map &vm,
   return 0;
 }
 
+void get_dfork_switch_arguments(po::options_description *positional,
+                                po::options_description *options) {
+  at::add_image_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
+  at::add_image_id_option(options);
+  options->add_options()
+    ("on", po::bool_switch(), "switch on the dfork mode");
+  options->add_options()
+    ("off", po::bool_switch(), "switch off the dfork mode");
+  options->add_options()
+    ("all", po::bool_switch(), "targeting all images");
+}
+
+int execute_dfork_switch(const po::variables_map &vm,
+                         const std::vector<std::string> &ceph_global_init_args) {
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_name;
+  std::string snap_name;
+  std::string image_id;
+  bool is_on, is_off, do_all;
+  int r;
+  
+  do_all = vm["all"].as<bool>();
+
+  if (!do_all) {
+    if (vm.count(at::IMAGE_ID)) {
+      image_id = vm[at::IMAGE_ID].as<std::string>();
+    }
+
+    r = utils::get_pool_image_snapshot_names(
+      vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
+      &image_name, &snap_name, image_id.empty(),
+      utils::SNAPSHOT_PRESENCE_PERMITTED, utils::SPEC_VALIDATION_NONE);
+    if (r < 0) {
+      return r;
+    }
+
+    if (!image_id.empty() && !image_name.empty()) {
+      std::cerr << "rbd: trying to access image using both name and id. "
+                << std::endl;
+      return -EINVAL;
+    }
+    if (!snap_name.empty()) {
+      std::cerr << "rbd: operation not supported on snapshots not. "
+                << std::endl;
+      return -EINVAL;
+    }
+  }
+  else {
+    image_id = "default";
+  }
+
+  is_on = vm["on"].as<bool>();
+  is_off = vm["off"].as<bool>();
+  if (is_on && is_off) {
+    std::cerr << "rbd: please specify either on/off" 
+              << std::endl;
+    return -EINVAL;
+  }
+  else if (!is_on && !is_off) {
+    std::cerr << "rbd: no on/off action specified" 
+              << std::endl;
+    return -EINVAL;
+  }
+  if (is_on && do_all) {
+    std::cerr << "rbd: switching on dfork mode for all images not supported" 
+              << std::endl;
+    return -EOPNOTSUPP;
+  }
+
+  r = do_dfork_switch(pool_name, namespace_name, 
+                      image_name, image_id, is_on, do_all);
+
+  return r;
+}
+
 Shell::Action action_create(
   {"dfork", "create"}, {"dfork", "add"}, "dfork a disk image.", "",
   &get_create_arguments, &execute_create_v2);
@@ -856,6 +956,9 @@ Shell::Action action_remove(
 Shell::Action action_check_dirty(
   {"dfork", "dirty"}, {}, "Check the dfork dirty bit of an image", "",
   &get_check_dirty_arguments, &execute_check_dirty);
+Shell::Action action_switch(
+  {"dfork", "switch"}, {}, "Switch the dfork mode on/off for an image", "",
+  &get_dfork_switch_arguments, &execute_dfork_switch);
 // Below is still with v2 dirty bit, no longer needed
 // Shell::Action action_set_dirty(
 //   {"dfork", "__dirty"}, {}, "Set the dfork dirty bit (for internal use)", "",

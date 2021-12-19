@@ -525,15 +525,16 @@ namespace librbd {
   }
 
   /* linanqinqin */
-  int RBD::set_dfork_dirty(IoCtx& io_ctx, const char *name, 
-                           const char *id, uint8_t dirty, 
-                           const char *loc_oid) {
+  int RBD::set_dfork_dirty(IoCtx& io_ctx, const std::string &name, 
+                           const std::string &id, uint8_t dirty, 
+                           const std::string &loc_oid) {
 
     int r = librbd::set_dfork_dirty(io_ctx, name, id, dirty, loc_oid);
     return r;
   }
 
-  int RBD::check_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id, 
+  int RBD::check_dfork_dirty(IoCtx& io_ctx, const std::string &name, 
+                             const std::string &id, 
                              uint8_t *dirty, bool block, bool no_cache) {
 
     int r = librbd::check_dfork_dirty(io_ctx, name, id, dirty, block, no_cache);
@@ -561,15 +562,24 @@ namespace librbd {
   //   return 0;
   // }
 
-  int RBD::unblock_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id) {
+  int RBD::unblock_dfork_dirty(IoCtx& io_ctx, const std::string &name, 
+                               const std::string &id) {
 
     int r = librbd::unblock_dfork_dirty(io_ctx, name, id);
     return r;
   }
 
-  int RBD::reset_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id) {
+  int RBD::reset_dfork_dirty(IoCtx& io_ctx, const std::string &name, 
+                             const std::string &id) {
 
     int r = librbd::reset_dfork_dirty(io_ctx, name, id);
+    return r;
+  }
+
+  int RBD::dfork_switch(IoCtx& io_ctx, const std::string &name, 
+                        const std::string &id, bool switch_on, bool do_all) {
+
+    int r = librbd::dfork_switch(io_ctx, name, id, switch_on, do_all);
     return r;
   }
   /* end */

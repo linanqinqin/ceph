@@ -254,15 +254,17 @@ public:
   int open_by_id(IoCtx& io_ctx, Image& image, const char *id);
   int open_by_id(IoCtx& io_ctx, Image& image, const char *id, const char *snapname);
   /* linanqinqin */
-  int set_dfork_dirty(IoCtx& io_ctx, const char *name, 
-                      const char *id, uint8_t dirty, 
-                      const char *loc_oid);
+  int set_dfork_dirty(IoCtx& io_ctx, const std::string &name, 
+                      const std::string &id, uint8_t dirty, 
+                      const std::string &loc_oid);
   // int check_dfork_dirty(IoCtx& io_ctx, Image& image, const char *name,
   //                       const char *id, bool block);
-  int check_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id, 
+  int check_dfork_dirty(IoCtx& io_ctx, const std::string &name, const std::string &id, 
                         uint8_t *dirty, bool block, bool no_cache);
-  int unblock_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id);
-  int reset_dfork_dirty(IoCtx& io_ctx, const char *name, const char *id);
+  int unblock_dfork_dirty(IoCtx& io_ctx, const std::string &name, const std::string &id);
+  int reset_dfork_dirty(IoCtx& io_ctx, const std::string &name, const std::string &id);
+  int dfork_switch(IoCtx& io_ctx, const std::string &name, const std::string &id, 
+                   bool switch_on, bool do_all);
   /* end */
   int aio_open(IoCtx& io_ctx, Image& image, const char *name,
 	       const char *snapname, RBD::AioCompletion *c);
