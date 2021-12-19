@@ -217,6 +217,18 @@ To build the documentation, ensure that you are in the top-level
 
 See https://docs.ceph.com/en/latest/man/8/rbd/ for the general `rbd` man page
 
+### New dfork with improved COW performance
+This version of dfork does not create a separate disk image, but instead map the
+same image with a switch to turn on/off dfork mode. 
+
+#### Switch on/off dfork mode for a disk image
+
+	rbd dfork switch foo --on/off        # switch on/off for foo
+	rbd dfork switch --off --all         # switch off for all images
+
+### Old version with snapshotting/cloning
+This version relies on Ceph's snapshotting and cloning mechanisms. 
+
 #### Create/remove a dfork-ed disk image
 
 	rbd dfork create|add foo@dfoo        # dfoo = dfork(foo)
