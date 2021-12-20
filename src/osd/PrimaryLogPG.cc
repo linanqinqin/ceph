@@ -2336,13 +2336,59 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   // const hobject_t& oid =
   //   m->get_snapid() == CEPH_SNAPDIR ? head : m->get_hobj();
   /* end */
+
   /* linanqinqin */
   // modify the object name!!!
   hobject_t __oid =
     m->get_snapid() == CEPH_SNAPDIR ? head : m->get_hobj();
   const std::string parent_oid_name(__oid.oid.name);
-  bool is_write_child = false;
+  bool is_data_op = (__oid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0);
+  bool is_write_op = false;
+  bool is_read_op = false;
   bool is_delete_op = false;
+  bool is_delete_child = false;
+  /* end */
+
+  // make sure LIST_SNAPS is on CEPH_SNAPDIR and nothing else
+  for (vector<OSDOp>::iterator p = m->ops.begin(); p != m->ops.end(); ++p) {
+    OSDOp& osd_op = *p;
+
+    if (osd_op.op.op == CEPH_OSD_OP_LIST_SNAPS) {
+      if (m->get_snapid() != CEPH_SNAPDIR) {
+	dout(10) << "LIST_SNAPS with incorrect context" << dendl;
+	osd->reply_op_error(op, -EINVAL);
+	return;
+      }
+    } else {
+      if (m->get_snapid() == CEPH_SNAPDIR) {
+	dout(10) << "non-LIST_SNAPS on snapdir" << dendl;
+	osd->reply_op_error(op, -EINVAL);
+	return;
+      }
+    }
+
+    /* linanqinqin */
+    if (is_data_op) {
+      if (osd_op.op.op == CEPH_OSD_OP_WRITE || 
+          osd_op.op.op == CEPH_OSD_OP_WRITEFULL ||
+          osd_op.op.op == CEPH_OSD_OP_WRITESAME) {
+        is_write_op = true;
+      }
+      else if (osd_op.op.op == CEPH_OSD_OP_READ || 
+               osd_op.op.op == CEPH_OSD_OP_SYNC_READ ) {
+        is_read_op = true;
+      }
+      // if deleting a parent data object, needs to delete the child as well
+      else if (osd_op.op.op == CEPH_OSD_OP_DELETE) {
+        is_delete_op = true;
+        is_delete_child = m->has_flag(CEPH_OSD_FLAG_DFORK_REMOVE);
+      }
+    }
+    /* end */
+  }
+
+  /* linanqinqin */
+  bool is_write_child = false;
   int r;
 
   // if (__oid.oid.name.find("rbd_data.") != std::string::npos) { 
@@ -2361,33 +2407,14 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
 
   // if ((__oid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0) && op->may_write()) {
   // if (is_dforked() && (__oid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0)) {
-  if (is_dfork_on(__oid.oid.name)) {
+  if (is_data_op && is_dfork_on(__oid.oid.name)) {
     // dout(0) << "linanqinqin osd_max_object_name_len " << cct->_conf->osd_max_object_name_len << dendl;
     // dout(0) << "linanqinqin is_dforked" << dendl;
     // if (op->may_write()) {
     //   is_cow = true;
     // }
 
-    bool is_write_op = false;
-    bool is_read_op = false;
-
-    for (vector<OSDOp>::iterator p = m->ops.begin(); p != m->ops.end(); ++p) {
-      OSDOp& osd_op = *p;
-      if (osd_op.op.op == CEPH_OSD_OP_WRITE || 
-          osd_op.op.op == CEPH_OSD_OP_WRITEFULL ||
-          osd_op.op.op == CEPH_OSD_OP_WRITESAME) {
-        is_write_op = true;
-        break;
-      }
-      else if (osd_op.op.op == CEPH_OSD_OP_READ || 
-               osd_op.op.op == CEPH_OSD_OP_SYNC_READ || 
-               osd_op.op.op == CEPH_OSD_OP_SYNC_READ) {
-        is_read_op = true;
-        break;
-      }
-    }
-
-    if (is_write_op || is_read_op) {
+    if (is_write_op || is_read_op || is_delete_child) {
       __oid.oid.name = get_child_oid_name(parent_oid_name);
       r = find_object_context(
         __oid, &obc, can_create,
@@ -2412,8 +2439,8 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
         // dout(0) << "linanqinqin do_op write " << __oid.oid.name << dendl;
         // dout(0) << "linanqinqin do_op write-child " << __oid.oid.name << dendl; 
       }
-      // this is not a write
-      else {
+      // this is a write
+      else if (is_read_op) {
         if (!obc) {
           // should read the parent oid instead
           __oid.oid.name = parent_oid_name;
@@ -2423,9 +2450,24 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
             &missing_oid);
           // dout(0) << "linanqinqin do_op read-parent " << __oid.oid.name << dendl; 
         }
-        // else {
-        //   dout(0) << "linanqinqin do_op read-child " << __oid.oid.name << dendl; 
-        // }
+        else if (!(obc->obs.exists)) {
+          // should read the parent oid instead
+          __oid.oid.name = parent_oid_name;
+          r = find_object_context(
+            __oid, &obc, can_create,
+            m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+            &missing_oid);
+          // dout(0) << "linanqinqin do_op read-parent " << __oid.oid.name << dendl;
+        }
+        else {
+          // dout(0) << "linanqinqin do_op read-child " << __oid.oid.name << dendl; 
+        }
+      }
+      // this is a delete_child
+      else {
+        // allowing delete child when dfork mode is on
+        // nothing needs to be done
+        // dout(0) << "linanqinqin do_op delete-child " << __oid.oid.name << dendl; 
       }
     }
     else {
@@ -2434,6 +2476,14 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
         m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
         &missing_oid);
     }
+  }
+  // delete_child in normal mode
+  else if (is_delete_child) {
+    __oid.oid.name = get_child_oid_name(parent_oid_name);
+    r = find_object_context(
+      __oid, &obc, can_create,
+      m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+      &missing_oid);
   }
   else {
     r = find_object_context(
@@ -2449,33 +2499,6 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   //   }
   // }
   /* end */
-
-  // make sure LIST_SNAPS is on CEPH_SNAPDIR and nothing else
-  for (vector<OSDOp>::iterator p = m->ops.begin(); p != m->ops.end(); ++p) {
-    OSDOp& osd_op = *p;
-
-    if (osd_op.op.op == CEPH_OSD_OP_LIST_SNAPS) {
-      if (m->get_snapid() != CEPH_SNAPDIR) {
-	dout(10) << "LIST_SNAPS with incorrect context" << dendl;
-	osd->reply_op_error(op, -EINVAL);
-	return;
-      }
-    } else {
-      if (m->get_snapid() == CEPH_SNAPDIR) {
-	dout(10) << "non-LIST_SNAPS on snapdir" << dendl;
-	osd->reply_op_error(op, -EINVAL);
-	return;
-      }
-    }
-
-    /* linanqinqin */
-    // if deleting a parent data object, needs to delete the child as well
-    if (osd_op.op.op == CEPH_OSD_OP_DELETE && 
-        (oid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0)) {
-      is_delete_op = true;
-    }
-    /* end */
-  }
 
   // io blocked on obc?
   if (!m->has_flag(CEPH_OSD_FLAG_FLUSH) &&
@@ -2681,9 +2704,12 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
       // dout(0) << "linanqinqin do_op cow " << ctx->parent_oid_name << " " << ctx->parent_oi_size << dendl;
     }
   }
-  else if (is_delete_op) {
-    ctx->is_parent_delete = true;
+  else if (is_delete_op && !is_delete_child) {
+    ctx->is_delete_parent = true;
     ctx->child_oid_name = get_child_oid_name(parent_oid_name);
+
+    dout(0) << "linanqinqin do_op delete " << parent_oid_name 
+            << " " << ctx->child_oid_name << dendl;
   }
   // const hobject_t& __soid = ctx->new_obs.oi.soid;
   // if (__soid.oid.name.find("rbd_data.") != std::string::npos) {
@@ -6204,14 +6230,16 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     /* linanqinqin */
     // if (soid.oid.name.find("rbd_data.") != std::string::npos) {
-    //   std::string __op_type = "OTHER";
+    //   // std::string __op_type = "OTHER";
     //   if (op.op == CEPH_OSD_OP_READ) {
-    //     __op_type = "READ";
+    //     // __op_type = "READ";
+    //     dout(0) << "linanqinqin do_osd_op READ " << soid.oid.name << dendl;
     //   }
     //   else if (op.op == CEPH_OSD_OP_WRITE) {
-    //     __op_type = "WRITE";
+    //     // __op_type = "WRITE";
+    //     dout(0) << "linanqinqin do_osd_op WRITE " << soid.oid.name << dendl;
     //   }
-    //   dout(0) << "linanqinqin do_osd_op " << __op_type << " " << soid.oid.name << dendl;
+    //   // dout(0) << "linanqinqin do_osd_op " << __op_type << " " << soid.oid.name << dendl;
     // }
     /* end */
 
@@ -7357,15 +7385,22 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
       //   tmp_soid.oid.name = orig_oid_name;
       // }
-      if (ctx->is_parent_delete) {
+      if (ctx->is_delete_parent) {
+
+        ctx->is_delete_parent = false;
+
         hobject_t& tmp_soid = oi.soid;
         std::string orig_oid_name(soid.oid.name);
 
         tmp_soid.oid.name = ctx->child_oid_name;
+        obs.exists = true;
         _delete_oid(ctx, false, ctx->ignore_cache);
-        
+
         tmp_soid.oid.name = orig_oid_name;
+        obs.exists = true;
       }
+
+      // dout(0) << "linanqinqin do_osd_op delete " << soid.oid.name << dendl;
     }
     /* end */
       ++ctx->num_write;
@@ -8701,6 +8736,11 @@ inline int PrimaryLogPG::_delete_oid(
   if (!obs.exists || (obs.oi.is_whiteout() && whiteout))
     return -ENOENT;
 
+  /* linanqinqin */
+  if (soid.oid.name.find("rbd_data.") != std::string::npos) {
+    dout(0) << "linanqinqin _delete_oid " << soid.oid.name << dendl;
+  }
+  /* end */
   t->remove(soid);
 
   if (oi.size > 0) {

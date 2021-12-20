@@ -616,7 +616,8 @@ public:
 
     /* linanqinqin */
     bool is_cow;  // is COW write for a data object
-    bool is_parent_delete; // deleting a parent data object
+    bool is_delete_parent; // deleting a parent data object
+    // bool is_delete_child; // deleting only the child data object
     std::string parent_oid_name;
     std::string child_oid_name;
     uint64_t parent_oi_size;
@@ -734,7 +735,7 @@ public:
       new_obs(obs->oi, obs->exists),
       /* linanqinqin */
       is_cow(false),
-      is_parent_delete(false),
+      is_delete_parent(false),
       /* end */
       modify(false), user_modify(false), undirty(false), cache_operation(false),
       ignore_cache(false), ignore_log_op_stats(false), update_log_only(false),

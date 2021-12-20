@@ -582,6 +582,26 @@ namespace librbd {
     int r = librbd::dfork_switch(io_ctx, name, id, switch_on, do_all);
     return r;
   }
+
+  int RBD::dfork_remove(IoCtx& io_ctx, const std::string &name)
+  {
+    // TracepointProvider::initialize<tracepoint_traits>(get_cct(io_ctx));
+    // tracepoint(librbd, remove_enter, io_ctx.get_pool_name().c_str(), io_ctx.get_id(), name);
+    librbd::NoOpProgressContext prog_ctx;
+    int r = librbd::dfork_remove(io_ctx, name, prog_ctx);
+    // tracepoint(librbd, remove_exit, r);
+    return r;
+  }
+
+  int RBD::dfork_remove_with_progress(IoCtx& io_ctx, const std::string &name,
+                                      ProgressContext& pctx)
+  {
+    // TracepointProvider::initialize<tracepoint_traits>(get_cct(io_ctx));
+    // tracepoint(librbd, remove_enter, io_ctx.get_pool_name().c_str(), io_ctx.get_id(), name);
+    int r = librbd::dfork_remove(io_ctx, name, pctx);
+    // tracepoint(librbd, remove_exit, r);
+    return r;
+  }
   /* end */
 
   int RBD::aio_open(IoCtx& io_ctx, Image& image, const char *name,

@@ -86,6 +86,7 @@ set(librbd_internal_srcs
   image/CreateRequest.cc
   image/DetachChildRequest.cc
   image/DetachParentRequest.cc
+  image/DforkRemoveRequest.cc
   image/DforkSwitchRequest.cc
   image/GetMetadataRequest.cc
   image/ListWatchersRequest.cc
@@ -183,6 +184,7 @@ set(librbd_internal_srcs
   object_map/SnapshotRollbackRequest.cc
   object_map/UnlockRequest.cc
   object_map/UpdateRequest.cc
+  operation/DforkRemoveRequest.cc
   operation/DisableFeaturesRequest.cc
   operation/EnableFeaturesRequest.cc
   operation/FlattenRequest.cc

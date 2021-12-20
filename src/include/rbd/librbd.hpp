@@ -265,6 +265,9 @@ public:
   int reset_dfork_dirty(IoCtx& io_ctx, const std::string &name, const std::string &id);
   int dfork_switch(IoCtx& io_ctx, const std::string &name, const std::string &id, 
                    bool switch_on, bool do_all);
+  int dfork_remove(IoCtx& io_ctx, const std::string &name);
+  int dfork_remove_with_progress(IoCtx& io_ctx, const std::string &name,
+                                      ProgressContext& pctx);
   /* end */
   int aio_open(IoCtx& io_ctx, Image& image, const char *name,
 	       const char *snapname, RBD::AioCompletion *c);

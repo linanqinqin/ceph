@@ -97,6 +97,7 @@ namespace librbd {
                         const std::string &image_id);
   int dfork_switch(IoCtx& io_ctx, const std::string &image_name,
                    const std::string &image_id, bool switch_on, bool do_all);
+  int dfork_remove(IoCtx& io_ctx, const std::string &name, ProgressContext& pctx);
   /* end */
   int get_features(ImageCtx *ictx, uint64_t *features);
   int get_overlap(ImageCtx *ictx, uint64_t *overlap);

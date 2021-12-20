@@ -247,6 +247,28 @@ static int do_dfork_switch(const std::string &pool_name,
   return 0;
 }
 
+static int do_dfork_delete(const std::string &pool_name, 
+                           const std::string &namespace_name,  
+                           const std::string &image_name, 
+                           bool no_progress) {
+  librados::Rados rados; 
+  librados::IoCtx io_ctx;
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  utils::ProgressContext pc("Removing dfork image", no_progress);
+  r = rbd.dfork_remove_with_progress(io_ctx, image_name, pc);
+  if (r < 0) {
+    pc.fail();
+    return r;
+  }
+  pc.finish();
+  return 0;
+}
+
 void get_create_arguments(po::options_description *positional,
                           po::options_description *options) {
   at::add_snap_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
@@ -903,7 +925,7 @@ int execute_dfork_switch(const po::variables_map &vm,
     r = utils::get_pool_image_snapshot_names(
       vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
       &image_name, &snap_name, image_id.empty(),
-      utils::SNAPSHOT_PRESENCE_PERMITTED, utils::SPEC_VALIDATION_NONE);
+      utils::SNAPSHOT_PRESENCE_NONE, utils::SPEC_VALIDATION_NONE);
     if (r < 0) {
       return r;
     }
@@ -914,7 +936,7 @@ int execute_dfork_switch(const po::variables_map &vm,
       return -EINVAL;
     }
     if (!snap_name.empty()) {
-      std::cerr << "rbd: operation not supported on snapshots not. "
+      std::cerr << "rbd: operation not supported on snapshots. "
                 << std::endl;
       return -EINVAL;
     }
@@ -947,6 +969,55 @@ int execute_dfork_switch(const po::variables_map &vm,
   return r;
 }
 
+void get_dfork_abort_arguments(po::options_description *positional,
+                                po::options_description *options) {
+  at::add_image_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
+  at::add_image_id_option(options);
+  at::add_no_progress_option(options);
+}
+
+int execute_dfork_abort(const po::variables_map &vm,
+                        const std::vector<std::string> &ceph_global_init_args) {
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_name;
+  std::string snap_name;
+  std::string image_id;
+  int r;
+
+  if (vm.count(at::IMAGE_ID)) {
+    image_id = vm[at::IMAGE_ID].as<std::string>();
+  }
+
+  r = utils::get_pool_image_snapshot_names(
+    vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
+    &image_name, &snap_name, image_id.empty(),
+    utils::SNAPSHOT_PRESENCE_NONE, utils::SPEC_VALIDATION_NONE);
+  if (r < 0) {
+    return r;
+  }
+
+  if (!image_id.empty() && !image_name.empty()) {
+    std::cerr << "rbd: trying to access image using both name and id. "
+              << std::endl;
+    return -EINVAL;
+  }
+  if (!snap_name.empty()) {
+    std::cerr << "rbd: operation not supported on snapshots. "
+              << std::endl;
+    return -EINVAL;
+  }
+
+  r = do_dfork_switch(pool_name, namespace_name, 
+                      image_name, image_id, false, false);
+  
+  r = do_dfork_delete(pool_name, namespace_name, 
+                      image_name, vm[at::NO_PROGRESS].as<bool>());
+
+  return r;
+}
+
 Shell::Action action_create(
   {"dfork", "create"}, {"dfork", "add"}, "dfork a disk image.", "",
   &get_create_arguments, &execute_create_v2);
@@ -959,6 +1030,9 @@ Shell::Action action_check_dirty(
 Shell::Action action_switch(
   {"dfork", "switch"}, {}, "Switch the dfork mode on/off for an image", "",
   &get_dfork_switch_arguments, &execute_dfork_switch);
+Shell::Action action_abort(
+  {"dfork", "abort"}, {}, "Abort a dfork image", "",
+  &get_dfork_abort_arguments, &execute_dfork_abort);
 // Below is still with v2 dirty bit, no longer needed
 // Shell::Action action_set_dirty(
 //   {"dfork", "__dirty"}, {}, "Set the dfork dirty bit (for internal use)", "",
