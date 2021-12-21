@@ -8737,9 +8737,9 @@ inline int PrimaryLogPG::_delete_oid(
     return -ENOENT;
 
   /* linanqinqin */
-  if (soid.oid.name.find("rbd_data.") != std::string::npos) {
-    dout(0) << "linanqinqin _delete_oid " << soid.oid.name << dendl;
-  }
+  // if (soid.oid.name.find("rbd_data.") != std::string::npos) {
+  //   dout(0) << "linanqinqin _delete_oid " << soid.oid.name << dendl;
+  // }
   /* end */
   t->remove(soid);
 
