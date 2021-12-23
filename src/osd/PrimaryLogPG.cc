@@ -2032,6 +2032,49 @@ inline bool is_dfork_on(const std::string& oname) {
 static inline std::string get_child_oid_name(const std::string& parent_oname) {
   return "d" + parent_oname;
 }
+
+// static inline std::string get_data_image_id(const std::string& oname) {
+//   constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
+//   return oname.substr(len_prefix, oname.find(".", len_prefix)-len_prefix);
+// }
+
+enum dfork_access_t {
+  DFORK_ACCESS_PARENT,
+  DFORK_ACCESS_CHILD,
+  DFORK_ACCESS_NONE
+};
+// inline dfork_access_t get_dfork_access_type(const std::string& oname, 
+//                                             const std::string& src_ip) {
+//   const std::string dfork_conf_dir("/etc/ceph/dfork/");
+//   constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
+//   const std::string image_id(oname.substr(len_prefix, oname.find(".", len_prefix)-len_prefix));
+
+//   struct stat __buf;
+//   int r = stat((dfork_conf_dir+image_id+"/"+src_ip).c_str(), &__buf);
+//   if (r == 0) {
+//     // directory if parent, regular file if child
+//     return S_ISDIR(__buf.st_mode)?DFORK_ACCESS_PARENT:DFORK_ACCESS_CHILD;
+//   }
+//   else {
+//     return DFORK_ACCESS_NONE;
+//   }
+// }
+inline dfork_access_t get_dfork_access_type(const std::string& oname, 
+                                            const std::string& src_ip) {
+  const std::string dfork_conf_dir("/etc/ceph/dfork/");
+  // constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
+  // const std::string image_id(oname.substr(len_prefix, oname.find(".", len_prefix)-len_prefix));
+
+  struct stat __buf;
+  int r = stat((dfork_conf_dir+src_ip).c_str(), &__buf);
+  if (r == 0) {
+    // directory if parent, regular file if child
+    return S_ISDIR(__buf.st_mode)?DFORK_ACCESS_PARENT:DFORK_ACCESS_CHILD;
+  }
+  else {
+    return DFORK_ACCESS_NONE;
+  }
+}
 /* end */
 
 /** do_op - do an op
@@ -2339,14 +2382,15 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
 
   /* linanqinqin */
   // modify the object name!!!
-  hobject_t __oid =
+  hobject_t oid =
     m->get_snapid() == CEPH_SNAPDIR ? head : m->get_hobj();
-  const std::string parent_oid_name(__oid.oid.name);
-  bool is_data_op = (__oid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0);
+
+  bool is_data_op = (oid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0);
   bool is_write_op = false;
   bool is_read_op = false;
   bool is_delete_op = false;
   bool is_delete_child = false;
+  bool is_setallochint_op = false;
   /* end */
 
   // make sure LIST_SNAPS is on CEPH_SNAPDIR and nothing else
@@ -2383,115 +2427,106 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
         is_delete_op = true;
         is_delete_child = m->has_flag(CEPH_OSD_FLAG_DFORK_REMOVE);
       }
+      else if (osd_op.op.op == CEPH_OSD_OP_SETALLOCHINT) {
+        is_setallochint_op = true;
+      }
+      else {
+        // dout(0) << "linanqinqin do_op unknown_data_op " << oid.oid.name 
+        //         << " " << osd_op.op.op << dendl;
+      }
     }
     /* end */
   }
 
   /* linanqinqin */
+  const std::string parent_oid_name(oid.oid.name);
+  const std::string req_src_ip(op->get_src_ip_str());
   bool is_write_child = false;
   int r;
 
-  // if (__oid.oid.name.find("rbd_data.") != std::string::npos) { 
-  //   dout(0) << "linanqinqin do_op before-decision " << __oid.oid.name << dendl; 
-  // }
+  if (is_primary() && (is_write_op || is_read_op)) {
+    dfork_access_t da_type = get_dfork_access_type(oid.oid.name, req_src_ip);
 
-  // test the overhead of checking whether dfork enabled
-  // {
-  //   auto time_started = std::chrono::system_clock::now();
-  //   bool dfork_is_on = is_dfork_on(__oid.oid.name);
-  //   auto time_ended = std::chrono::system_clock::now();
-  //   long us_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time_ended-time_started).count();
-  //   dout(0) << "linanqinqin dfork_on " << dfork_is_on 
-  //           << " " << us_elapsed << dendl;
-  // }
+    dout(20) << "linanqinqin do_op " << oid.oid.name
+            << " req_src_ip=" << req_src_ip
+            << " access_t=" << da_type << dendl;
 
-  // if ((__oid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0) && op->may_write()) {
-  // if (is_dforked() && (__oid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0)) {
-  if (is_data_op && is_dfork_on(__oid.oid.name)) {
-    // dout(0) << "linanqinqin osd_max_object_name_len " << cct->_conf->osd_max_object_name_len << dendl;
-    // dout(0) << "linanqinqin is_dforked" << dendl;
-    // if (op->may_write()) {
-    //   is_cow = true;
+    // if (da_type == DFORK_ACCESS_NONE) {
+    //   dout(0) << "linanqinqin do_op client " req_src_ip 
+    //           << " not registered to access " oid.oid.name << dendl;
+    //   osd->reply_op_error(op, -EPERM);
+    //   return;
     // }
 
-    if (is_write_op || is_read_op || is_delete_child) {
-      __oid.oid.name = get_child_oid_name(parent_oid_name);
+    switch (da_type) {
+    case DFORK_ACCESS_PARENT:
       r = find_object_context(
-        __oid, &obc, can_create,
+        oid, &obc, can_create,
+        m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+        &missing_oid);
+    break;
+
+    case DFORK_ACCESS_CHILD:
+      // find the child object
+      oid.oid.name = get_child_oid_name(parent_oid_name);
+      r = find_object_context(
+        oid, &obc, can_create,
         m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
         &missing_oid);
 
       // this is a write
       // if (op->may_write()) { // This does not catch all writes
       if (is_write_op) {
-        // seems like the below code does not work
-        // seems like obc always exists
-        // should defer the check to inside do_osd_ops
-        // if (!obc) {
-        //   is_cow = true;
-        //   dout(0) << "linanqinqin do_op COW " << __oid.oid.name << dendl; 
-        // }
-        // else {
-        //   dout(0) << "linanqinqin do_op non-COW " << __oid.oid.name << dendl; 
-        // }
-
         is_write_child = true;
-        // dout(0) << "linanqinqin do_op write " << __oid.oid.name << dendl;
-        // dout(0) << "linanqinqin do_op write-child " << __oid.oid.name << dendl; 
       }
-      // this is a write
-      else if (is_read_op) {
+      // this is a read
+      else {
         if (!obc) {
+          // the child object does not exist
           // should read the parent oid instead
-          __oid.oid.name = parent_oid_name;
+          oid.oid.name = parent_oid_name;
           r = find_object_context(
-            __oid, &obc, can_create,
+            oid, &obc, can_create,
             m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
-            &missing_oid);
-          // dout(0) << "linanqinqin do_op read-parent " << __oid.oid.name << dendl; 
+            &missing_oid); 
         }
         else if (!(obc->obs.exists)) {
+          // the child object does not exist
           // should read the parent oid instead
-          __oid.oid.name = parent_oid_name;
+          oid.oid.name = parent_oid_name;
           r = find_object_context(
-            __oid, &obc, can_create,
+            oid, &obc, can_create,
             m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
             &missing_oid);
-          // dout(0) << "linanqinqin do_op read-parent " << __oid.oid.name << dendl;
         }
         else {
-          // dout(0) << "linanqinqin do_op read-child " << __oid.oid.name << dendl; 
+          // the child object exists, directly read it
         }
       }
-      // this is a delete_child
-      else {
-        // allowing delete child when dfork mode is on
-        // nothing needs to be done
-        // dout(0) << "linanqinqin do_op delete-child " << __oid.oid.name << dendl; 
-      }
-    }
-    else {
-      r = find_object_context(
-        __oid, &obc, can_create,
-        m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
-        &missing_oid);
+    break;
+
+    default:
+      dout(0) << "linanqinqin do_op client " << req_src_ip 
+              << " not registered to access " << oid.oid.name << dendl;
+      osd->reply_op_error(op, -EPERM);
+      return;
     }
   }
-  // delete_child in normal mode
-  else if (is_delete_child) {
-    __oid.oid.name = get_child_oid_name(parent_oid_name);
+  else if(is_delete_child) {
+    oid.oid.name = get_child_oid_name(parent_oid_name);
     r = find_object_context(
-      __oid, &obc, can_create,
+      oid, &obc, can_create,
       m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
       &missing_oid);
   }
   else {
     r = find_object_context(
-      __oid, &obc, can_create,
+      oid, &obc, can_create,
       m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
       &missing_oid);
   }
-  const hobject_t& oid(__oid);
+
+  // const hobject_t& oid(oid);
   // if (oid.oid.name.find("rbd_data.") != std::string::npos) {
   //   // dout(0) << "linanqinqin do_op after-decision " << oid.oid.name << dendl;
   //   if (op->may_write()) {
@@ -2683,24 +2718,23 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   if (is_write_child) {
     if (!ctx->new_obs.exists) {
 
-      hobject_t& parent_oid(__oid);
-      ObjectContextRef parent_obc;
+      hobject_t& parent_oid(oid);
       hobject_t parent_missing_oid;
 
+      // get the parent obc for information like oi.size and oi.expected_object_size 
+      // for use in COW in do_osd_ops
       parent_oid.oid.name = parent_oid_name;
       find_object_context(
-        parent_oid, &parent_obc, false,
+        parent_oid, &(ctx->parent_obc), false,
         m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
         &parent_missing_oid);
 
-      if (parent_obc) {
-        // record the parent object oi size for use in cow_read in do_osd_ops
-        ctx->parent_oi_size = parent_obc->obs.oi.size;
+      if (ctx->parent_obc) {
+        if (ctx->parent_obc->obs.exists) {
+          ctx->is_cow = true;
+          // ctx->parent_oid_name = parent_oid_name;
+        }
       }
-
-      ctx->is_cow = true;
-      ctx->parent_oid_name = parent_oid_name;
-
       // dout(0) << "linanqinqin do_op cow " << ctx->parent_oid_name << " " << ctx->parent_oi_size << dendl;
     }
   }
@@ -2708,8 +2742,8 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     ctx->is_delete_parent = true;
     ctx->child_oid_name = get_child_oid_name(parent_oid_name);
 
-    dout(0) << "linanqinqin do_op delete " << parent_oid_name 
-            << " " << ctx->child_oid_name << dendl;
+    // dout(0) << "linanqinqin do_op delete " << parent_oid_name 
+    //         << " " << ctx->child_oid_name << dendl;
   }
   // const hobject_t& __soid = ctx->new_obs.oi.soid;
   // if (__soid.oid.name.find("rbd_data.") != std::string::npos) {
@@ -6026,6 +6060,7 @@ int PrimaryLogPG::do_read(OpContext *ctx, OSDOp& osd_op) {
   //   dout(0) << "linanqinqin do_read then" 
   //           << " op.extent.length is now " << op.extent.length << dendl;
   // }
+  // bool is_cow = op.extent.length == 0;
   /* end */
 
   // read into a buffer
@@ -6060,8 +6095,22 @@ int PrimaryLogPG::do_read(OpContext *ctx, OSDOp& osd_op) {
       soid, op.extent.offset, op.extent.length, op.flags, &osd_op.outdata);
     /* linanqinqin */
     // if (soid.oid.name.find("rbd_data.") != std::string::npos) {
-    //   dout(0) << "linanqinqin do_read sync " << soid.oid.name << " " << r << " " << cpp_strerror(r) << dendl;
-    // }
+    // if (r >= 0 && !is_cow) {
+    //   if (soid.oid.name.rfind("rbd_data.", 0) == 0) {
+    //     uint32_t __val = *(osd_op.outdata.begin());
+    //     if (__val != 'P') {
+    //       dout(0) << "linanqinqin do_read parent mismatch " << soid.oid.name 
+    //               << " " << __val << dendl;
+    //     }
+    //   }
+    //   else if (soid.oid.name.rfind("drbd_data.", 0) == 0) {
+    //     uint32_t __val = *(osd_op.outdata.begin());
+    //     if (__val != 'C') {
+    //       dout(0) << "linanqinqin do_read child mismatch " << soid.oid.name 
+    //               << " " << __val << dendl;
+    //     }
+    //   }
+    // } 
     /* end */
     // whole object?  can we verify the checksum?
     if (r >= 0 && op.extent.offset == 0 &&
@@ -6305,6 +6354,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       // --- READS ---
 
     case CEPH_OSD_OP_CMPEXT:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CMPEXT " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CMPEXT << dendl;
+      /* end */
       ++ctx->num_read;
       tracepoint(osd, do_osd_op_pre_extent_cmp, osd->whoami, soid.oid.name.c_str(),
 		 soid.snap.val, oi.size, oi.truncate_seq, op.extent.offset,
@@ -6319,12 +6372,20 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_SYNC_READ:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_SYNC_READ " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_SYNC_READ << dendl;
+      /* end */
       if (pool.info.is_erasure()) {
 	result = -EOPNOTSUPP;
 	break;
       }
       // fall through
     case CEPH_OSD_OP_READ:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_READ " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_READ << dendl;
+      /* end */
       ++ctx->num_read;
       /* linanqinqin */
       // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin osd_read " << soid.oid.name.c_str() << dendl;
@@ -6346,6 +6407,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_CHECKSUM:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CHECKSUM " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CHECKSUM << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	tracepoint(osd, do_osd_op_pre_checksum, osd->whoami, soid.oid.name.c_str(),
@@ -6363,6 +6428,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     /* map extents */
     case CEPH_OSD_OP_MAPEXT:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_MAPEXT " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_MAPEXT << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_mapext, osd->whoami, soid.oid.name.c_str(), soid.snap.val, op.extent.offset, op.extent.length);
       if (pool.info.is_erasure()) {
 	result = -EOPNOTSUPP;
@@ -6387,6 +6456,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     /* map extents */
     case CEPH_OSD_OP_SPARSE_READ:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_SPARSE_READ " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_SPARSE_READ << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_sparse_read, osd->whoami, soid.oid.name.c_str(),
 		 soid.snap.val, oi.size, oi.truncate_seq, op.extent.offset,
 		 op.extent.length, op.extent.truncate_size,
@@ -6399,6 +6472,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_CALL:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CALL " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CALL << dendl;
+      /* end */
       {
 	string cname, mname;
 	bufferlist indata;
@@ -6459,6 +6536,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_STAT:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_STAT " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_STAT << dendl;
+      /* end */
       // note: stat does not require RD
       {
 	tracepoint(osd, do_osd_op_pre_stat, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
@@ -6477,6 +6558,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_ISDIRTY:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_ISDIRTY " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_ISDIRTY << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	tracepoint(osd, do_osd_op_pre_isdirty, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
@@ -6488,6 +6573,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_UNDIRTY:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_UNDIRTY " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_UNDIRTY << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -6501,6 +6590,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_CACHE_TRY_FLUSH:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CACHE_TRY_FLUSH " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CACHE_TRY_FLUSH << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -6534,6 +6627,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_CACHE_FLUSH:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CACHE_FLUSH " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CACHE_FLUSH << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -6576,6 +6673,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_CACHE_EVICT:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CACHE_EVICT " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CACHE_EVICT << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -6617,6 +6718,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_GETXATTR:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_GETXATTR " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_GETXATTR << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	string aname;
@@ -6639,6 +6744,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
    case CEPH_OSD_OP_GETXATTRS:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_GETXATTRS " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_GETXATTRS << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	tracepoint(osd, do_osd_op_pre_getxattrs, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
@@ -6656,6 +6765,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_CMPXATTR:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CMPXATTR " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CMPXATTR << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	string aname;
@@ -6723,6 +6836,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_ASSERT_VER:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_ASSERT_VER " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_ASSERT_VER << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	uint64_t ver = op.assert_ver.ver;
@@ -6737,6 +6854,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_LIST_WATCHERS:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_LIST_WATCHERS " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_LIST_WATCHERS << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	tracepoint(osd, do_osd_op_pre_list_watchers, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
@@ -6764,6 +6885,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       }
 
     case CEPH_OSD_OP_LIST_SNAPS:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_LIST_SNAPS " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_LIST_SNAPS << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	tracepoint(osd, do_osd_op_pre_list_snaps, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
@@ -6854,6 +6979,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       }
 
    case CEPH_OSD_OP_NOTIFY:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_NOTIFY " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_NOTIFY << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	uint32_t timeout;
@@ -6884,6 +7013,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_NOTIFY_ACK:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_NOTIFY_ACK " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_NOTIFY_ACK << dendl;
+      /* end */
       ++ctx->num_read;
       {
 	try {
@@ -6910,9 +7043,22 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_SETALLOCHINT:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_SETALLOCHINT " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_SETALLOCHINT << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
+        /* linanqinqin */
+        // dout(0) << "linanqinqin do_osd_op setallochint " << soid.oid.name 
+        //         << " " << oi.expected_object_size
+        //         << " " << oi.expected_write_size
+        //         << " " << oi.alloc_hint_flags
+        //         << " " << op.alloc_hint.expected_object_size
+        //         << " " << op.alloc_hint.expected_write_size
+        //         << " " << op.alloc_hint.flags << dendl;
+        /* end */
 	tracepoint(osd, do_osd_op_pre_setallochint, osd->whoami, soid.oid.name.c_str(), soid.snap.val, op.alloc_hint.expected_object_size, op.alloc_hint.expected_write_size);
 	maybe_create_new_object(ctx);
 	oi.expected_object_size = op.alloc_hint.expected_object_size;
@@ -6930,6 +7076,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       // -- object data --
 
     case CEPH_OSD_OP_WRITE:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_WRITE " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_WRITE << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       { // write
@@ -6957,11 +7107,13 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
           // dout(0) << "linanqinqin do_osd_op COW " << soid.oid.name << dendl;
           // dout(0) << "linanqinqin obs.exists: " << obs.exists << dendl;
+          dout(20) << "linanqinqin do_osd_ops cow write " << soid.oid.name << dendl;
 
           ctx->is_cow = false;
 
           // dout(0) << "linanqinqin do_osd_op COW " << soid.oid.name << dendl;
 
+          object_info_t& parent_oi = ctx->parent_obc->obs.oi;
           hobject_t& tmp_soid = oi.soid;
           std::string my_oid_name(tmp_soid.oid.name);
           uint64_t my_oi_size = oi.size;
@@ -6969,8 +7121,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
           vector<OSDOp> cow_ops(1);
           OSDOp& cow_op = cow_ops[0];
 
-          tmp_soid.oid.name = ctx->parent_oid_name;
-          oi.size = ctx->parent_oi_size;
+          tmp_soid.oid.name = parent_oi.soid.oid.name;
+          oi.size = parent_oi.size;
           cow_op.op.op = CEPH_OSD_OP_READ;
           cow_op.op.extent.offset = 0;
           cow_op.op.extent.length = 0;
@@ -6982,27 +7134,45 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
           //         << " " << cow_op.indata.length()
           //         << " " << cow_op.outdata.length() << dendl;
 
+          /* write the parent object to the child */
           tmp_soid.oid.name = my_oid_name;
           oi.size = my_oi_size;
+          oi.expected_object_size = parent_oi.expected_object_size;
+          oi.expected_write_size = oi.expected_object_size;
 
-          // merge the data
-          // NOTE: panic if copying in longer data buffer
-          // cow_op.outdata.begin().copy_in(osd_op.indata.length(), osd_op.indata);
-          // auto time_started = std::chrono::system_clock::now();
-          auto parent_range = cow_op.outdata.length();
-          auto child_range = op.extent.offset + osd_op.indata.length();
-          // cow_op.outdata.swap(osd_op.indata); // swap does not work! it's not swapping the two
-          // dout(0) << "linanqinqin do_osd_op cow_merge swap " << tmp_soid.oid.name 
-          //         << " " << osd_op.indata.length()  
-          //         << " " << cow_op.outdata.length() << dendl;
-          if (child_range > parent_range) {
-            cow_op.outdata.append_zero(child_range-parent_range);
-          }
-          cow_op.outdata.begin(op.extent.offset).copy_in(osd_op.indata.length(), osd_op.indata);
-          osd_op.indata = cow_op.outdata;
+          // preparing the write
+          cow_op.indata = std::move(cow_op.outdata);
+          cow_op.op.op = CEPH_OSD_OP_WRITE;
+          cow_op.op.extent.offset = 0;
+          cow_op.op.extent.length = cow_op.indata.length();
 
-          op.extent.offset = 0;
-          op.extent.length = osd_op.indata.length();
+          do_osd_ops(ctx, cow_ops);
+
+          /* apply the delta */
+          // nothing needs to be done
+
+          /* merging part */
+          // // merge the data
+          // // NOTE: panic if copying in longer data buffer
+          // // cow_op.outdata.begin().copy_in(osd_op.indata.length(), osd_op.indata);
+          // // auto time_started = std::chrono::system_clock::now();
+          // auto parent_range = cow_op.outdata.length();
+          // auto child_range = op.extent.offset + osd_op.indata.length();
+          // // cow_op.outdata.swap(osd_op.indata); // swap does not work! it's not swapping the two
+          // // dout(0) << "linanqinqin do_osd_op cow_merge swap " << tmp_soid.oid.name 
+          // //         << " " << osd_op.indata.length()  
+          // //         << " " << cow_op.outdata.length() << dendl;
+          // if (child_range > parent_range) {
+          //   cow_op.outdata.append_zero(child_range-parent_range);
+          // }
+          // cow_op.outdata.begin(op.extent.offset).copy_in(osd_op.indata.length(), osd_op.indata);
+          // osd_op.indata = std::move(cow_op.outdata);
+
+          // oi.expected_object_size = 4194304;
+          // oi.expected_write_size = 4194304;
+          // op.extent.offset = 0;
+          // op.extent.length = osd_op.indata.length();
+          /* merging part end */
           // auto time_ended = std::chrono::system_clock::now();
           // long us_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time_ended-time_started).count();
           // dout(0) << "linanqinqin do_osd_op cow_merge " << tmp_soid.oid.name 
@@ -7011,6 +7181,29 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
           //         << " " << osd_op.indata.length()  
           //         << " " << cow_op.outdata.length() 
           //         << " " << us_elapsed << dendl;
+
+          // set alloc hint
+          // dout(0) << "linanqinqin do_osd_op is_cow setallochint " << soid.oid.name  
+          //         << " " << op.alloc_hint.expected_object_size
+          //         << " " << op.alloc_hint.expected_write_size
+          //         << " " << op.alloc_hint.flags 
+          //         << " " << oi.expected_object_size 
+          //         << " " << oi.expected_write_size 
+          //         << " " << oi.alloc_hint_flags << dendl;
+          // op.alloc_hint.expected_object_size = 4194304;
+          // op.alloc_hint.expected_write_size = 4194304;
+          // maybe_create_new_object(ctx);
+          // oi.expected_object_size = op.alloc_hint.expected_object_size;
+          // oi.expected_write_size = op.alloc_hint.expected_write_size;
+          // oi.alloc_hint_flags = op.alloc_hint.flags; // essentially 0 
+          // t->set_alloc_hint(soid, op.alloc_hint.expected_object_size,
+          //                   op.alloc_hint.expected_write_size,
+          //                   op.alloc_hint.flags);
+
+          // op.extent.offset = 0;
+          // op.alloc_hint.expected_object_size = op.extent.offset;
+          // op.alloc_hint.expected_write_size = op.extent.length;
+
 
           // hobject_t& tmp_soid = oi.soid;
           // std::string my_oid_name(tmp_soid.oid.name);
@@ -7059,7 +7252,22 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
         //   dout(0) << "linanqinqin do_osd_op non-COW " << soid.oid.name << dendl;
         // }
         // if (soid.oid.name.find("rbd_data.") != std::string::npos) {
-        //   dout(0) << "linanqinqin do_osd_op write " << soid.oid.name << dendl;
+        //   dout(0) << "linanqinqin do_osd_op write " << soid.oid.name 
+        //           << " op.extent.offset=" << op.extent.offset
+        //           << " op.extent.length=" << op.extent.length
+        //           << " osd_op.indata.length()=" << osd_op.indata.length()
+        //           << " oi.size=" << oi.size
+        //           << " oi.expected_object_size=" << oi.expected_object_size
+        //           << " oi.expected_write_size=" << oi.expected_write_size
+        //           << " op.alloc_hint.expected_object_size=" << op.alloc_hint.expected_object_size
+        //           << " op.alloc_hint.expected_write_size=" << op.alloc_hint.expected_write_size << dendl;
+        // }
+        // if (soid.oid.name.rfind("rbd_data.", 0) == 0) {
+        //   uint32_t __val = *(osd_op.indata.begin());
+        //   if (__val != 'P') {
+        //     dout(0) << "linanqinqin do_osd_op write parent mismatch " << soid.oid.name 
+        //             << " " << __val << dendl;
+        //   }
         // }
       /* end */
         __u32 seq = oi.truncate_seq;
@@ -7168,14 +7376,21 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_WRITEFULL:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_WRITEFULL " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_WRITEFULL << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       /* linanqinqin */
       {
         if (ctx->is_cow) {
 
+          dout(20) << "linanqinqin do_osd_ops cow writefull " << soid.oid.name << dendl;
+
           ctx->is_cow = false;
 
+          object_info_t& parent_oi = ctx->parent_obc->obs.oi;
           hobject_t& tmp_soid = oi.soid;
           std::string my_oid_name(tmp_soid.oid.name);
           uint64_t my_oi_size = oi.size;
@@ -7183,29 +7398,30 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
           vector<OSDOp> cow_ops(1);
           OSDOp& cow_op = cow_ops[0];
 
-          tmp_soid.oid.name = ctx->parent_oid_name;
-          oi.size = ctx->parent_oi_size;
+          tmp_soid.oid.name = parent_oi.soid.oid.name;
+          oi.size = parent_oi.size;
           cow_op.op.op = CEPH_OSD_OP_READ;
           cow_op.op.extent.offset = 0;
           cow_op.op.extent.length = 0;
 
           do_osd_ops(ctx, cow_ops);
 
+          /* write the parent object to the child */
           tmp_soid.oid.name = my_oid_name;
           oi.size = my_oi_size;
+          oi.expected_object_size = parent_oi.expected_object_size;
+          oi.expected_write_size = oi.expected_object_size;
 
-          // merge the data
-          // NOTE: panic if copying in longer data buffer
-          auto parent_range = cow_op.outdata.length();
-          auto child_range = op.extent.offset + osd_op.indata.length();
-          if (child_range > parent_range) {
-            cow_op.outdata.append_zero(child_range-parent_range);
-          }
-          cow_op.outdata.begin(op.extent.offset).copy_in(osd_op.indata.length(), osd_op.indata);
-          osd_op.indata = cow_op.outdata;
+          // preparing the write
+          cow_op.indata = std::move(cow_op.outdata);
+          cow_op.op.op = CEPH_OSD_OP_WRITE;
+          cow_op.op.extent.offset = 0;
+          cow_op.op.extent.length = cow_op.indata.length();
 
-          op.extent.offset = 0;
-          op.extent.length = osd_op.indata.length();
+          do_osd_ops(ctx, cow_ops);
+
+          /* apply the delta */
+          // nothing needs to be done
         }
       }
       /* end */
@@ -7247,18 +7463,30 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_WRITESAME:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_WRITESAME " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_WRITESAME << dendl;
+      /* end */
       ++ctx->num_write;
       tracepoint(osd, do_osd_op_pre_writesame, osd->whoami, soid.oid.name.c_str(), soid.snap.val, oi.size, op.writesame.offset, op.writesame.length, op.writesame.data_length);
       result = do_writesame(ctx, osd_op);
       break;
 
     case CEPH_OSD_OP_ROLLBACK :
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_ROLLBACK " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_ROLLBACK << dendl;
+      /* end */
       ++ctx->num_write;
       tracepoint(osd, do_osd_op_pre_rollback, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       result = _rollback_to(ctx, op);
       break;
 
     case CEPH_OSD_OP_ZERO:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_ZERO " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_ZERO << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_zero, osd->whoami, soid.oid.name.c_str(), soid.snap.val, op.extent.offset, op.extent.length);
       if (pool.info.requires_aligned_append()) {
 	result = -EOPNOTSUPP;
@@ -7287,6 +7515,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       }
       break;
     case CEPH_OSD_OP_CREATE:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CREATE " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CREATE << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7314,10 +7546,18 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_TRIMTRUNC:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TRIMTRUNC " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TRIMTRUNC << dendl;
+      /* end */
       op.extent.offset = op.extent.truncate_size;
       // falling through
 
     case CEPH_OSD_OP_TRUNCATE:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TRUNCATE " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TRUNCATE << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_truncate, osd->whoami, soid.oid.name.c_str(), soid.snap.val, oi.size, oi.truncate_seq, op.extent.offset, op.extent.length, op.extent.truncate_size, op.extent.truncate_seq);
       if (pool.info.requires_aligned_append()) {
 	result = -EOPNOTSUPP;
@@ -7374,6 +7614,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_DELETE:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_DELETE " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_DELETE << dendl;
+      /* end */
     /* linanqinqin */
     {
       // if (soid.oid.name.rfind("rbd_data.", 0) == 0) {
@@ -7412,6 +7656,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_WATCH:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_WATCH " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_WATCH << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7495,6 +7743,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_CACHE_PIN:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CACHE_PIN " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CACHE_PIN << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_cache_pin, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if ((!pool.info.is_tier() ||
 	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE)) {
@@ -7520,6 +7772,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_CACHE_UNPIN:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_CACHE_UNPIN " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_CACHE_UNPIN << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_cache_unpin, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if ((!pool.info.is_tier() ||
 	  pool.info.cache_mode == pg_pool_t::CACHEMODE_NONE)) {
@@ -7545,6 +7801,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_SET_REDIRECT:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_SET_REDIRECT " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_SET_REDIRECT << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7656,6 +7916,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_SET_CHUNK:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_SET_CHUNK " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_SET_CHUNK << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7774,6 +8038,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_TIER_PROMOTE:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TIER_PROMOTE " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TIER_PROMOTE << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7832,6 +8100,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_TIER_FLUSH:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TIER_FLUSH " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TIER_FLUSH << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7864,6 +8136,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_TIER_EVICT:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TIER_EVICT " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TIER_EVICT << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7905,6 +8181,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_UNSET_MANIFEST:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_UNSET_MANIFEST " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_UNSET_MANIFEST << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7939,6 +8219,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       // -- object attrs --
 
     case CEPH_OSD_OP_SETXATTR:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_SETXATTR " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_SETXATTR << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7968,6 +8252,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_RMXATTR:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_RMXATTR " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_RMXATTR << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {
@@ -7987,6 +8275,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
       // -- fancy writers --
     case CEPH_OSD_OP_APPEND:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_APPEND " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_APPEND << dendl;
+      /* end */
       {
 	tracepoint(osd, do_osd_op_pre_append, osd->whoami, soid.oid.name.c_str(), soid.snap.val, oi.size, oi.truncate_seq, op.extent.offset, op.extent.length, op.extent.truncate_size, op.extent.truncate_seq);
 	// just do it inline; this works because we are happy to execute
@@ -8004,12 +8296,20 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_STARTSYNC:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_STARTSYNC " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_STARTSYNC << dendl;
+      /* end */
       result = 0;
       t->nop(soid);
       break;
 
       // -- trivial map --
     case CEPH_OSD_OP_TMAPGET:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TMAPGET " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TMAPGET << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_tmapget, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if (pool.info.is_erasure()) {
 	result = -EOPNOTSUPP;
@@ -8027,6 +8327,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_TMAPPUT:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TMAPPUT " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TMAPPUT << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_tmapput, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if (pool.info.is_erasure()) {
 	result = -EOPNOTSUPP;
@@ -8086,6 +8390,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_TMAPUP:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TMAPUP " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TMAPUP << dendl;
+      /* end */
       tracepoint(osd, do_osd_op_pre_tmapup, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if (pool.info.is_erasure()) {
 	result = -EOPNOTSUPP;
@@ -8096,6 +8404,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_TMAP2OMAP:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_TMAP2OMAP " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_TMAP2OMAP << dendl;
+      /* end */
       ++ctx->num_write;
       tracepoint(osd, do_osd_op_pre_tmap2omap, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       result = do_tmap2omap(ctx, op.tmap2omap.flags);
@@ -8103,6 +8415,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
       // OMAP Read ops
     case CEPH_OSD_OP_OMAPGETKEYS:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPGETKEYS " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPGETKEYS << dendl;
+      /* end */
       /* linanqinqin */
       dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPGETKEYS " 
                                        << soid.oid.name << dendl;
@@ -8152,6 +8468,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_OMAPGETVALS:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPGETVALS " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPGETVALS << dendl;
+      /* end */
       /* linanqinqin */
       dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPGETVALS " 
                                        << soid.oid.name << dendl;
@@ -8213,8 +8533,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     case CEPH_OSD_OP_OMAPGETHEADER:
       /* linanqinqin */
-      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPGETHEADER " 
-                                       << soid.oid.name << dendl;
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPGETHEADER " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPGETHEADER << dendl;
       /* end */
       tracepoint(osd, do_osd_op_pre_omapgetheader, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if (!oi.is_omap()) {
@@ -8231,8 +8551,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     case CEPH_OSD_OP_OMAPGETVALSBYKEYS:
       /* linanqinqin */
-      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPGETVALSBYKEYS " 
-                                       << soid.oid.name << dendl;
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPGETVALSBYKEYS " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPGETVALSBYKEYS << dendl;
       /* end */
       ++ctx->num_read;
       {
@@ -8281,8 +8601,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     case CEPH_OSD_OP_OMAP_CMP:
       /* linanqinqin */
-      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAP_CMP " 
-                                       << soid.oid.name << dendl;
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAP_CMP " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAP_CMP << dendl;
       /* end */
       ++ctx->num_read;
       {
@@ -8361,8 +8681,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       // OMAP Write ops
     case CEPH_OSD_OP_OMAPSETVALS:
       /* linanqinqin */
-      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPSETVALS " 
-                                       << soid.oid.name << dendl;
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPSETVALS " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPSETVALS << dendl;
       /* end */
       if (!pool.info.supports_omap()) {
 	result = -EOPNOTSUPP;
@@ -8405,8 +8725,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     case CEPH_OSD_OP_OMAPSETHEADER:
       /* linanqinqin */
-      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPSETHEADER " 
-                                       << soid.oid.name << dendl;
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPSETHEADER " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPSETHEADER << dendl;
       /* end */
       tracepoint(osd, do_osd_op_pre_omapsetheader, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if (!pool.info.supports_omap()) {
@@ -8427,8 +8747,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     case CEPH_OSD_OP_OMAPCLEAR:
       /* linanqinqin */
-      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPCLEAR " 
-                                       << soid.oid.name << dendl;
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPCLEAR " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPCLEAR << dendl;
       /* end */
       tracepoint(osd, do_osd_op_pre_omapclear, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if (!pool.info.supports_omap()) {
@@ -8454,8 +8774,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     case CEPH_OSD_OP_OMAPRMKEYS:
       /* linanqinqin */
-      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPRMKEYS " 
-                                       << soid.oid.name << dendl;
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPRMKEYS " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPRMKEYS << dendl;
       /* end */
       if (!pool.info.supports_omap()) {
 	result = -EOPNOTSUPP;
@@ -8489,8 +8809,8 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     case CEPH_OSD_OP_OMAPRMKEYRANGE:
       /* linanqinqin */
-      dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin CEPH_OSD_OP_OMAPRMKEYRANGE " 
-                                       << soid.oid.name << dendl;
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_OMAPRMKEYRANGE " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_OMAPRMKEYRANGE << dendl;
       /* end */
       tracepoint(osd, do_osd_op_pre_omaprmkeyrange, osd->whoami, soid.oid.name.c_str(), soid.snap.val);
       if (!pool.info.supports_omap()) {
@@ -8519,6 +8839,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       break;
 
     case CEPH_OSD_OP_COPY_GET:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_COPY_GET " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_COPY_GET << dendl;
+      /* end */
       ++ctx->num_read;
       tracepoint(osd, do_osd_op_pre_copy_get, osd->whoami, soid.oid.name.c_str(),
 		 soid.snap.val);
@@ -8531,6 +8855,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 
     case CEPH_OSD_OP_COPY_FROM:
     case CEPH_OSD_OP_COPY_FROM2:
+      /* linanqinqin */
+      // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_COPY_FROM " << soid.oid.name
+      //         << " " << CEPH_OSD_OP_COPY_FROM << dendl;
+      /* end */
       ++ctx->num_write;
       result = 0;
       {

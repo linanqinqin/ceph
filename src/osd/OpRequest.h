@@ -116,6 +116,12 @@ public:
     }
   }
 
+  /* linanqinqin */
+  std::string get_src_ip_str() {
+    return req_src_inst.addr.ip_only_to_str();
+  }
+  /* end */
+
   std::string_view state_string() const override {
     switch(latest_flag_point) {
     case flag_queued_for_pg: return "queued for pg";

@@ -618,9 +618,10 @@ public:
     bool is_cow;  // is COW write for a data object
     bool is_delete_parent; // deleting a parent data object
     // bool is_delete_child; // deleting only the child data object
-    std::string parent_oid_name;
+    // std::string parent_oid_name;
     std::string child_oid_name;
-    uint64_t parent_oi_size;
+    // uint64_t parent_oi_size;
+    ObjectContextRef parent_obc;
     /* end */
 
     bool modify;          // (force) modification (even if op_t is empty)
