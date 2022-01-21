@@ -2075,6 +2075,22 @@ inline dfork_access_t get_dfork_access_type(const std::string& oname,
     return DFORK_ACCESS_NONE;
   }
 }
+
+bool do_dirty_track(void) {
+  static auto last_time = std::chrono::duration_cast<std::chrono::seconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+
+  auto current_time = std::chrono::duration_cast<std::chrono::seconds>(
+    std::chrono::system_clock::now().time_since_epoch()).count();
+
+  if (current_time > last_time) {
+    last_time = current_time;
+    return true;
+  }
+  else {
+    return false;
+  }
+}
 /* end */
 
 /** do_op - do an op
@@ -2444,6 +2460,12 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   bool is_write_child = false;
   int r;
 
+  /* for testing dirty bit tracking overhead 
+  if (is_write_op && do_dirty_track()) {
+    dout(0) << "linanqinqin this write need permission" << dendl;
+  }
+   end */
+
   if (is_primary() && (is_write_op || is_read_op)) {
     dfork_access_t da_type = get_dfork_access_type(oid.oid.name, req_src_ip);
 
@@ -2739,8 +2761,23 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     }
   }
   else if (is_delete_op && !is_delete_child) {
-    ctx->is_delete_parent = true;
+
+    hobject_t& child_oid(oid);
+    hobject_t child_missing_oid;
+    ObjectContextRef child_obc;
+
     ctx->child_oid_name = get_child_oid_name(parent_oid_name);
+    child_oid.oid.name = ctx->child_oid_name;
+    find_object_context(
+      child_oid, &child_obc, false,
+      m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+      &child_missing_oid);
+
+    if (child_obc) {
+      if (child_obc->obs.exists) {
+        ctx->is_delete_parent = true;
+      }
+    }
 
     // dout(0) << "linanqinqin do_op delete " << parent_oid_name 
     //         << " " << ctx->child_oid_name << dendl;
@@ -7084,191 +7121,53 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       result = 0;
       { // write
       /* linanqinqin */
-        // if (set_dfork_dirty(soid)) {
-          // using map
-          // for (auto it = dfork_dirty_map.cbegin(); it!=dfork_dirty_map.cend(); it++) {
-          //   dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin " 
-          //                                    << it->first << ": " << (int) it->second << dendl;
-          // }
-
-          // using set
-          // string out_str;
-          // for (auto it = dfork_dirty_set.begin(); it!=dfork_dirty_set.end(); it++) {
-          //   out_str += *it + "-";
-          // }
-          // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin set: " << out_str << dendl;
-
-          // dout(LNQQ_DOUT_PrimaryLogPG_LVL) << "linanqinqin write: " 
-                                           // << soid.oid.name << dendl;
-          // dout(0) << "linanqinqin write: " << soid.oid.name << dendl;
-        // }
-        // if (soid.oid.name.rfind("drbd_data.", 0) == 0 && (ctx->need_cow)) {
         if (ctx->is_cow) {
 
-          // dout(0) << "linanqinqin do_osd_op COW " << soid.oid.name << dendl;
-          // dout(0) << "linanqinqin obs.exists: " << obs.exists << dendl;
           dout(20) << "linanqinqin do_osd_ops cow write " << soid.oid.name << dendl;
 
           ctx->is_cow = false;
 
-          // dout(0) << "linanqinqin do_osd_op COW " << soid.oid.name << dendl;
+          if (op.extent.offset==0 && 
+              (op.extent.length==0 || (op.extent.length>=ctx->parent_obc->obs.oi.size))) {
+            // no need to copy first
+            dout(20) << "linanqinqin do_osd_ops cow write " << soid.oid.name 
+                     << ": no copy needed" << dendl;
+          }
+          else {
 
-          object_info_t& parent_oi = ctx->parent_obc->obs.oi;
-          hobject_t& tmp_soid = oi.soid;
-          std::string my_oid_name(tmp_soid.oid.name);
-          uint64_t my_oi_size = oi.size;
+            object_info_t& parent_oi = ctx->parent_obc->obs.oi;
+            hobject_t& tmp_soid = oi.soid;
+            std::string my_oid_name(tmp_soid.oid.name);
+            uint64_t my_oi_size = oi.size;
 
-          vector<OSDOp> cow_ops(1);
-          OSDOp& cow_op = cow_ops[0];
+            vector<OSDOp> cow_ops(1);
+            OSDOp& cow_op = cow_ops[0];
 
-          tmp_soid.oid.name = parent_oi.soid.oid.name;
-          oi.size = parent_oi.size;
-          cow_op.op.op = CEPH_OSD_OP_READ;
-          cow_op.op.extent.offset = 0;
-          cow_op.op.extent.length = 0;
+            tmp_soid.oid.name = parent_oi.soid.oid.name;
+            oi.size = parent_oi.size;
+            cow_op.op.op = CEPH_OSD_OP_READ;
+            cow_op.op.extent.offset = 0;
+            cow_op.op.extent.length = 0;
 
-          // int result = do_osd_ops(ctx, cow_ops);
-          do_osd_ops(ctx, cow_ops);
-          // dout(0) << "linanqinqin do_osd_op cow_read " << tmp_soid.oid.name
-          //         << " " << result << " " << cpp_strerror(result)
-          //         << " " << cow_op.indata.length()
-          //         << " " << cow_op.outdata.length() << dendl;
+            // read the parent data
+            do_osd_ops(ctx, cow_ops);
 
-          /* write the parent object to the child */
-          tmp_soid.oid.name = my_oid_name;
-          oi.size = my_oi_size;
-          oi.expected_object_size = parent_oi.expected_object_size;
-          oi.expected_write_size = oi.expected_object_size;
+            /* write the parent object to the child */
+            tmp_soid.oid.name = my_oid_name;
+            oi.size = my_oi_size;
+            oi.expected_object_size = parent_oi.expected_object_size;
+            oi.expected_write_size = oi.expected_object_size;
 
-          // preparing the write
-          cow_op.indata = std::move(cow_op.outdata);
-          cow_op.op.op = CEPH_OSD_OP_WRITE;
-          cow_op.op.extent.offset = 0;
-          cow_op.op.extent.length = cow_op.indata.length();
+            // preparing the write
+            cow_op.indata = std::move(cow_op.outdata);
+            cow_op.op.op = CEPH_OSD_OP_WRITE;
+            cow_op.op.extent.offset = 0;
+            cow_op.op.extent.length = cow_op.indata.length();
 
-          do_osd_ops(ctx, cow_ops);
-
-          /* apply the delta */
-          // nothing needs to be done
-
-          /* merging part */
-          // // merge the data
-          // // NOTE: panic if copying in longer data buffer
-          // // cow_op.outdata.begin().copy_in(osd_op.indata.length(), osd_op.indata);
-          // // auto time_started = std::chrono::system_clock::now();
-          // auto parent_range = cow_op.outdata.length();
-          // auto child_range = op.extent.offset + osd_op.indata.length();
-          // // cow_op.outdata.swap(osd_op.indata); // swap does not work! it's not swapping the two
-          // // dout(0) << "linanqinqin do_osd_op cow_merge swap " << tmp_soid.oid.name 
-          // //         << " " << osd_op.indata.length()  
-          // //         << " " << cow_op.outdata.length() << dendl;
-          // if (child_range > parent_range) {
-          //   cow_op.outdata.append_zero(child_range-parent_range);
-          // }
-          // cow_op.outdata.begin(op.extent.offset).copy_in(osd_op.indata.length(), osd_op.indata);
-          // osd_op.indata = std::move(cow_op.outdata);
-
-          // oi.expected_object_size = 4194304;
-          // oi.expected_write_size = 4194304;
-          // op.extent.offset = 0;
-          // op.extent.length = osd_op.indata.length();
-          /* merging part end */
-          // auto time_ended = std::chrono::system_clock::now();
-          // long us_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(time_ended-time_started).count();
-          // dout(0) << "linanqinqin do_osd_op cow_merge " << tmp_soid.oid.name 
-          //         << " " << child_range
-          //         << " " << parent_range
-          //         << " " << osd_op.indata.length()  
-          //         << " " << cow_op.outdata.length() 
-          //         << " " << us_elapsed << dendl;
-
-          // set alloc hint
-          // dout(0) << "linanqinqin do_osd_op is_cow setallochint " << soid.oid.name  
-          //         << " " << op.alloc_hint.expected_object_size
-          //         << " " << op.alloc_hint.expected_write_size
-          //         << " " << op.alloc_hint.flags 
-          //         << " " << oi.expected_object_size 
-          //         << " " << oi.expected_write_size 
-          //         << " " << oi.alloc_hint_flags << dendl;
-          // op.alloc_hint.expected_object_size = 4194304;
-          // op.alloc_hint.expected_write_size = 4194304;
-          // maybe_create_new_object(ctx);
-          // oi.expected_object_size = op.alloc_hint.expected_object_size;
-          // oi.expected_write_size = op.alloc_hint.expected_write_size;
-          // oi.alloc_hint_flags = op.alloc_hint.flags; // essentially 0 
-          // t->set_alloc_hint(soid, op.alloc_hint.expected_object_size,
-          //                   op.alloc_hint.expected_write_size,
-          //                   op.alloc_hint.flags);
-
-          // op.extent.offset = 0;
-          // op.alloc_hint.expected_object_size = op.extent.offset;
-          // op.alloc_hint.expected_write_size = op.extent.length;
-
-
-          // hobject_t& tmp_soid = oi.soid;
-          // std::string my_oid_name(tmp_soid.oid.name);
-
-          // vector<OSDOp> cow_ops(1);
-          // OSDOp& cow_op = cow_ops[0];
-
-          // // cow_op.soid.oid.name = tmp_soid.oid.name.substr(1, tmp_soid.oid.name.size()-1);
-          // // tmp_soid.oid.name = "non.existent.object";
-
-          // // temporarily modify the oid to the parent object
-          // // tmp_soid.oid.name = orig_oid_name.substr(1, orig_oid_name.size()-1);
-          // tmp_soid.oid.name = ctx->parent_oid_name;
-          // cow_op.op.op = CEPH_OSD_OP_READ;
-          // cow_op.op.extent.offset = 0;
-          // cow_op.op.extent.length = 0;
-
-          // int result = do_osd_ops(ctx, cow_ops);
-          // dout(0) << "linanqinqin do_osd_op cow_read " << tmp_soid.oid.name
-          //         << " " << result << " " << cpp_strerror(result)
-          //         << " " << cow_op.indata.length()
-          //         << " " << cow_op.outdata.length() << dendl;
-
-          // tmp_soid.oid.name = my_oid_name;
-          // // tmp_soid.oid.name = ctx->cow_oid_name;
-
-          // // osd_op.indata = cow_op.outdata;
-          // // osd_op.op.extent.offset = 0;
-          // // osd_op.op.extent.length = osd_op.indata.length();
-
-          // // dout(0) << "linanqinqin cow_write " << op.extent.length << dendl;
-
-          // // // copy data over for cow write
-          // // cow_op.indata.append(cow_op.outdata);
-
-          // // // prepare the write op
-          // // cow_op.op.op = CEPH_OSD_OP_WRITE;
-          // // cow_op.op.extent.length = cow_op.indata.length();
-
-          // // result = do_osd_ops(ctx, cow_ops);
-          // // dout(0) << "linanqinqin cow_write " << result 
-          // //         << " " << cow_op.indata.length()
-          // //         << " " << cow_op.outdata.length() << dendl;
+            // write parent data to child
+            do_osd_ops(ctx, cow_ops);
+          }
         }
-        // else {
-        //   dout(0) << "linanqinqin do_osd_op non-COW " << soid.oid.name << dendl;
-        // }
-        // if (soid.oid.name.find("rbd_data.") != std::string::npos) {
-        //   dout(0) << "linanqinqin do_osd_op write " << soid.oid.name 
-        //           << " op.extent.offset=" << op.extent.offset
-        //           << " op.extent.length=" << op.extent.length
-        //           << " osd_op.indata.length()=" << osd_op.indata.length()
-        //           << " oi.size=" << oi.size
-        //           << " oi.expected_object_size=" << oi.expected_object_size
-        //           << " oi.expected_write_size=" << oi.expected_write_size
-        //           << " op.alloc_hint.expected_object_size=" << op.alloc_hint.expected_object_size
-        //           << " op.alloc_hint.expected_write_size=" << op.alloc_hint.expected_write_size << dendl;
-        // }
-        // if (soid.oid.name.rfind("rbd_data.", 0) == 0) {
-        //   uint32_t __val = *(osd_op.indata.begin());
-        //   if (__val != 'P') {
-        //     dout(0) << "linanqinqin do_osd_op write parent mismatch " << soid.oid.name 
-        //             << " " << __val << dendl;
-        //   }
-        // }
       /* end */
         __u32 seq = oi.truncate_seq;
   tracepoint(osd, do_osd_op_pre_write, osd->whoami, soid.oid.name.c_str(), soid.snap.val, oi.size, seq, op.extent.offset, op.extent.length, op.extent.truncate_size, op.extent.truncate_seq);
@@ -7382,50 +7281,56 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       /* end */
       ++ctx->num_write;
       result = 0;
-      /* linanqinqin */
-      {
+      { // write full object
+        /* linanqinqin */
         if (ctx->is_cow) {
 
           dout(20) << "linanqinqin do_osd_ops cow writefull " << soid.oid.name << dendl;
 
           ctx->is_cow = false;
 
-          object_info_t& parent_oi = ctx->parent_obc->obs.oi;
-          hobject_t& tmp_soid = oi.soid;
-          std::string my_oid_name(tmp_soid.oid.name);
-          uint64_t my_oi_size = oi.size;
+          if (op.extent.offset==0 && 
+              (op.extent.length==0 || (op.extent.length>=ctx->parent_obc->obs.oi.size))) {
+            // no need to copy first
+            dout(20) << "linanqinqin do_osd_ops cow writefull " << soid.oid.name 
+                     << ": no copy needed" << dendl;
+          }
+          else {
 
-          vector<OSDOp> cow_ops(1);
-          OSDOp& cow_op = cow_ops[0];
+            object_info_t& parent_oi = ctx->parent_obc->obs.oi;
+            hobject_t& tmp_soid = oi.soid;
+            std::string my_oid_name(tmp_soid.oid.name);
+            uint64_t my_oi_size = oi.size;
 
-          tmp_soid.oid.name = parent_oi.soid.oid.name;
-          oi.size = parent_oi.size;
-          cow_op.op.op = CEPH_OSD_OP_READ;
-          cow_op.op.extent.offset = 0;
-          cow_op.op.extent.length = 0;
+            vector<OSDOp> cow_ops(1);
+            OSDOp& cow_op = cow_ops[0];
 
-          do_osd_ops(ctx, cow_ops);
+            tmp_soid.oid.name = parent_oi.soid.oid.name;
+            oi.size = parent_oi.size;
+            cow_op.op.op = CEPH_OSD_OP_READ;
+            cow_op.op.extent.offset = 0;
+            cow_op.op.extent.length = 0;
 
-          /* write the parent object to the child */
-          tmp_soid.oid.name = my_oid_name;
-          oi.size = my_oi_size;
-          oi.expected_object_size = parent_oi.expected_object_size;
-          oi.expected_write_size = oi.expected_object_size;
+            // read the parent data
+            do_osd_ops(ctx, cow_ops);
 
-          // preparing the write
-          cow_op.indata = std::move(cow_op.outdata);
-          cow_op.op.op = CEPH_OSD_OP_WRITE;
-          cow_op.op.extent.offset = 0;
-          cow_op.op.extent.length = cow_op.indata.length();
+            /* write the parent object to the child */
+            tmp_soid.oid.name = my_oid_name;
+            oi.size = my_oi_size;
+            oi.expected_object_size = parent_oi.expected_object_size;
+            oi.expected_write_size = oi.expected_object_size;
 
-          do_osd_ops(ctx, cow_ops);
+            // preparing the write
+            cow_op.indata = std::move(cow_op.outdata);
+            cow_op.op.op = CEPH_OSD_OP_WRITE;
+            cow_op.op.extent.offset = 0;
+            cow_op.op.extent.length = cow_op.indata.length();
 
-          /* apply the delta */
-          // nothing needs to be done
+            // write parent data to child
+            do_osd_ops(ctx, cow_ops);
+          }
         }
-      }
       /* end */
-      { // write full object
 	tracepoint(osd, do_osd_op_pre_writefull, osd->whoami, soid.oid.name.c_str(), soid.snap.val, oi.size, 0, op.extent.length);
 
 	if (op.extent.length != osd_op.indata.length()) {
