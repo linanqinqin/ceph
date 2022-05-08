@@ -466,6 +466,17 @@ if [ $kill_all -eq 1 ]; then
     $SUDO $INIT_CEPH stop
 fi
 
+# linanqinqin
+if [ ! -d "/etc/ceph/dfork" ]; then
+  if [ ! -d "/etc/ceph" ]; then
+    sudo mkdir /etc/ceph
+  fi
+  sudo chown $(id -u):$(id -g) /etc/ceph
+  mkdir /etc/ceph/dfork
+  echo "dfork config created"
+fi
+# end
+
 if [ "$new" -eq 0 ]; then
     if [ -z "$CEPH_ASOK_DIR" ]; then
         CEPH_ASOK_DIR=`dirname $($CEPH_BIN/ceph-conf  -c $conf_fn --show-config-value admin_socket)`
