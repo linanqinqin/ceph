@@ -182,10 +182,21 @@ bool set_dfork_dirty(const hobject_t& soid_) {
     std::string obj_offset = _oid.substr(len_prefix+img_id.length()+1);
     std::string rbd_cmd = "/mnt/ceph/build/bin/rbd dfork __dirty -c /mnt/ceph/build/ceph.conf --image-id=" 
                           + img_id + " --loc-oid=" 
-                          + obj_offset + " --set &>/dev/null";
+                          + obj_offset + " --set"; 
+                          // + obj_offset + " --set &>/dev/null";
 
-    int r = std::system(rbd_cmd.c_str());
-    if (WEXITSTATUS(r)) {
+    auto sh_pipe = popen(rbd_cmd.c_str(), "r"); // get rid of shared_ptr
+
+    if (!sh_pipe) {
+      dfork_dirty_set_mtx.unlock();
+      return false;
+    }
+
+    auto r = pclose(sh_pipe);
+
+    // int r = std::system(rbd_cmd.c_str());
+    // if (WEXITSTATUS(r)) {
+    if (r) {
       dfork_dirty_set_mtx.unlock();
       return false;
     }
@@ -2038,9 +2049,12 @@ static inline std::string get_child_oid_name(const std::string& parent_oname) {
 //   return oname.substr(len_prefix, oname.find(".", len_prefix)-len_prefix);
 // }
 
+const __u32 DFORK_TRANSFER_DONE = 666;
+
 enum dfork_access_t {
   DFORK_ACCESS_PARENT,
   DFORK_ACCESS_CHILD,
+  DFORK_ACCESS_TRANSFER,
   DFORK_ACCESS_NONE
 };
 // inline dfork_access_t get_dfork_access_type(const std::string& oname, 
@@ -2059,23 +2073,67 @@ enum dfork_access_t {
 //     return DFORK_ACCESS_NONE;
 //   }
 // }
+
+// // previously used
+// inline dfork_access_t get_dfork_access_type(const std::string& oname, 
+//                                             const std::string& src_ip) {
+//   constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
+//   const std::string image_id(oname.substr(len_prefix, oname.find(".", len_prefix)-len_prefix));
+//   const std::string dfork_conf_dir("/etc/ceph/dfork/"+image_id+"/");
+
+//   struct stat __buf;
+//   int r = stat((dfork_conf_dir+src_ip).c_str(), &__buf);
+//   if (r == 0) {
+//     // directory if parent, regular file if child
+//     return S_ISDIR(__buf.st_mode)?DFORK_ACCESS_PARENT:DFORK_ACCESS_CHILD;
+//   }
+//   else {
+//     return DFORK_ACCESS_NONE;
+//   }
+// }
+
 inline dfork_access_t get_dfork_access_type(const std::string& oname, 
                                             const std::string& src_ip) {
-  const std::string dfork_conf_dir("/etc/ceph/dfork/");
-  // constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
-  // const std::string image_id(oname.substr(len_prefix, oname.find(".", len_prefix)-len_prefix));
+  constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
+  const std::string image_id(oname.substr(len_prefix, oname.find(".", len_prefix)-len_prefix));
+  
+  const std::string dfork_trans_path("/etc/ceph/dfork/"+image_id+"/t-"+src_ip);
 
   struct stat __buf;
-  int r = stat((dfork_conf_dir+src_ip).c_str(), &__buf);
+  int r = stat(dfork_trans_path.c_str(), &__buf);
   if (r == 0) {
-    // directory if parent, regular file if child
-    return S_ISDIR(__buf.st_mode)?DFORK_ACCESS_PARENT:DFORK_ACCESS_CHILD;
+    return DFORK_ACCESS_TRANSFER;
   }
   else {
-    return DFORK_ACCESS_NONE;
+    const std::string dfork_ip_path("/etc/ceph/dfork/"+image_id+"/"+src_ip);
+
+    r = stat(dfork_ip_path.c_str(), &__buf);
+    if (r == 0) {
+      // directory if parent, regular file if child
+      return S_ISDIR(__buf.st_mode)?DFORK_ACCESS_PARENT:DFORK_ACCESS_CHILD;
+    }
+    else {
+      return DFORK_ACCESS_NONE;
+    }
   }
 }
 
+// inline bool is_in_dfork_transfer(const std::string& oname) {
+//   constexpr int len_prefix = strlen(RBD_DATA_PREFIX);
+//   const std::string image_id(oname.substr(len_prefix, oname.find(".", len_prefix)-len_prefix));
+//   const std::string dfork_conf_dir("/etc/ceph/dfork/"+image_id+"/intransfer");
+
+//   struct stat __buf;
+//   int r = stat((dfork_conf_dir).c_str(), &__buf);
+//   if (r == 0) {
+//     return true;
+//   }
+//   else {
+//     return false;
+//   }
+// }
+
+// This is for testing only
 bool do_dirty_track(void) {
   static auto last_time = std::chrono::duration_cast<std::chrono::seconds>(
     std::chrono::system_clock::now().time_since_epoch()).count();
@@ -2406,7 +2464,12 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   bool is_read_op = false;
   bool is_delete_op = false;
   bool is_delete_child = false;
-  bool is_setallochint_op = false;
+  bool is_noop_delete = false;
+  // bool is_setallochint_op = false;
+
+  bool is_in_transfer = false;
+  bool is_noop_write = false;
+  // ObjectContextRef transfer_child_obc;
   /* end */
 
   // make sure LIST_SNAPS is on CEPH_SNAPDIR and nothing else
@@ -2433,6 +2496,9 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
           osd_op.op.op == CEPH_OSD_OP_WRITEFULL ||
           osd_op.op.op == CEPH_OSD_OP_WRITESAME) {
         is_write_op = true;
+        is_noop_write = osd_op.op.extent.length == 1;
+        dout(0) << "linanqinqin do_op write " << oid.oid.name 
+                << " is_noop_write=" << is_noop_write << dendl;
       }
       else if (osd_op.op.op == CEPH_OSD_OP_READ || 
                osd_op.op.op == CEPH_OSD_OP_SYNC_READ ) {
@@ -2443,13 +2509,17 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
         is_delete_op = true;
         is_delete_child = m->has_flag(CEPH_OSD_FLAG_DFORK_REMOVE);
       }
-      else if (osd_op.op.op == CEPH_OSD_OP_SETALLOCHINT) {
-        is_setallochint_op = true;
-      }
+      // else if (osd_op.op.op == CEPH_OSD_OP_SETALLOCHINT) {
+      //   is_setallochint_op = true;
+      // }
       else {
         // dout(0) << "linanqinqin do_op unknown_data_op " << oid.oid.name 
         //         << " " << osd_op.op.op << dendl;
       }
+      // dout(0) << "linanqinqin do_op " << oid.oid.name 
+      //         << " op.flags=" << osd_op.op.flags 
+      //         << " m->has_flag=" << m->has_flag(CEPH_OSD_FLAG_DFORK_REMOVE) 
+      //         << " op->get_flags()=" << op->get_flags() << dendl;
     }
     /* end */
   }
@@ -2460,18 +2530,21 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   bool is_write_child = false;
   int r;
 
-  /* for testing dirty bit tracking overhead 
-  if (is_write_op && do_dirty_track()) {
-    dout(0) << "linanqinqin this write need permission" << dendl;
-  }
-   end */
+  /* for testing dirty bit tracking overhead */
+  // if (is_write_op && do_dirty_track()) {
+  //   dout(0) << "linanqinqin this write needs permission" << dendl;
+  // }
+  /* end */
 
   if (is_primary() && (is_write_op || is_read_op)) {
     dfork_access_t da_type = get_dfork_access_type(oid.oid.name, req_src_ip);
+    // is_in_transfer = is_in_dfork_transfer(oid.oid.name);
+    // dout(0) << "linanqinqin do_op " << oid.oid.name 
+    //         << " is in transfer: " << is_in_transfer << dendl;
 
-    dout(20) << "linanqinqin do_op " << oid.oid.name
-            << " req_src_ip=" << req_src_ip
-            << " access_t=" << da_type << dendl;
+    dout(10) << "linanqinqin do_op " << oid.oid.name
+             << " req_src_ip=" << req_src_ip
+             << " access_t=" << da_type << dendl;
 
     // if (da_type == DFORK_ACCESS_NONE) {
     //   dout(0) << "linanqinqin do_op client " req_src_ip 
@@ -2480,12 +2553,49 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
     //   return;
     // }
 
+    // // For read op under transfer mode, treat it as child mode
+    // // because read op does not allow write such that object 
+    // // transfer cannot be completed
+    // if ((da_type==DFORK_ACCESS_TRANSFER) && is_read_op) {
+    //   da_type = DFORK_ACCESS_CHILD;
+    // }
+
     switch (da_type) {
     case DFORK_ACCESS_PARENT:
+      // // TODO: the current impl this is buggy. There is a chance that the system would stall
+      // // if it's a write op to the parent, 
+      // // then the dirty bit needs to be set
+      // if (is_write_op) {
+      //   if (!set_dfork_dirty(oid)) {
+      //     dout(10) << "linanqinqin do_op set_dfork_dirty for " << oid.oid.name
+      //             << " failed" << dendl;
+      //     osd->reply_op_error(op, -EPERM);
+      //     return;
+      //   }
+      // }
+
       r = find_object_context(
         oid, &obc, can_create,
         m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
         &missing_oid);
+
+      if (obc) {
+        if (obc->obs.exists) {
+          dout(0) << "linanqinqin do_op parent " << oid.oid.name << " exists:"
+                  << " is_write_op=" << is_write_op
+                  << " is_read_op=" << is_read_op << dendl;
+        }
+        else {
+          dout(0) << "linanqinqin do_op parent " << oid.oid.name << " non-existent:"
+                  << " is_write_op=" << is_write_op
+                  << " is_read_op=" << is_read_op << dendl;
+        }
+      }
+      else {
+        dout(0) << "linanqinqin do_op parent " << oid.oid.name << " non-existent:"
+                << " is_write_op=" << is_write_op
+                << " is_read_op=" << is_read_op << dendl;
+      }
     break;
 
     case DFORK_ACCESS_CHILD:
@@ -2527,19 +2637,226 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
       }
     break;
 
+    // // below is the deprecated way of doing copy-back upon delete
+    // // while serving reads/writes normally based on the existence of 
+    // // the child object
+    // case DFORK_ACCESS_TRANSFER:
+    //   // find the child object
+    //   oid.oid.name = get_child_oid_name(parent_oid_name);
+    //   r = find_object_context(
+    //     oid, &obc, can_create,
+    //     m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+    //     &missing_oid);
+
+    //   if (!obc) {
+    //     // the child object does not exist
+    //     // should read/write the parent oid instead
+    //     oid.oid.name = parent_oid_name;
+    //     r = find_object_context(
+    //       oid, &obc, can_create,
+    //       m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+    //       &missing_oid); 
+
+    //     // dout(0) << "linanqinqin do_op transfer access parent" << dendl;
+    //   }
+    //   else if (!(obc->obs.exists)) {
+    //     // the child object does not exist
+    //     // should read/write the parent oid instead
+    //     oid.oid.name = parent_oid_name;
+    //     r = find_object_context(
+    //       oid, &obc, can_create,
+    //       m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+    //       &missing_oid);
+
+    //     // dout(0) << "linanqinqin do_op transfer access parent" << dendl;
+    //   }
+    //   else {
+    //     // the child object exists, directly read/write it
+    //     // dout(0) << "linanqinqin do_op transfer access child" << dendl;
+    //   }
+    // break;
+
+    case DFORK_ACCESS_TRANSFER:
+      // // only performs copy-back for write ops
+      // // (reads cannot do writes at all, and delete cannot write properly)
+      // is_in_transfer = is_write_op;
+
+      // // for reads/writes in transfer, always navigate to the parent 
+      // r = find_object_context(
+      //   oid, &obc, can_create,
+      //   m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+      //   &missing_oid);
+
+      // if (obc) {
+      //   dout(0) << "linanqinqin is_dfork_transfer_done=" << obc->obs.oi.is_dfork_transfer_done() << dendl;
+      // }
+
+      // find the child object
+      oid.oid.name = get_child_oid_name(parent_oid_name);
+      r = find_object_context(
+        oid, &obc, can_create,
+        m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+        &missing_oid);
+      if (obc) {
+        // route to the child iff the child object exists and transfer is not marked done
+        if (obc->obs.exists) {
+
+          ObjectContextRef parent_obc;
+          hobject_t& parent_oid(oid);
+          hobject_t parent_missing_oid;
+
+          parent_oid.oid.name = parent_oid_name;
+          find_object_context(
+            parent_oid, &parent_obc, false,
+            m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+            &parent_missing_oid);
+
+          if (parent_obc) {
+            if (parent_obc->obs.exists) {
+              if (parent_obc->obs.oi.is_dfork_transfer_done()) {
+                // this is when both parent and child exist but transfer is already done
+                // fall below to go to parent
+                dout(0) << "linanqinqin parent: both, done" << dendl;
+              }
+              else {
+                // this is when both parent and child exist but transfer is not done yet
+                // need to go to child
+                dout(0) << "linanqinqin child: both, not done" << dendl;
+                break;
+              }
+            }
+            else {
+              is_in_transfer = is_write_op && is_noop_write;
+              if (is_in_transfer) {
+                // this is when child exists but not parent, and is a transfer write
+                // need to go to parent
+                dout(0) << "linanqinqin parent: child, transfer" << dendl;
+              }
+              else {
+                // this is when child exists but not parent, not a transfer write
+                // need to go to child
+                dout(0) << "linanqinqin child: child, not transfer" << dendl;
+                break;
+              }
+            }
+          }
+          else {
+            is_in_transfer = is_write_op && is_noop_write;
+            if (is_in_transfer) {
+              // this is when child exists but not parent, and is a transfer write
+              // need to go to parent
+              dout(0) << "linanqinqin parent: child, transfer" << dendl;
+            }
+            else {
+              // this is when child exists but not parent, not a transfer write
+              // need to go to child
+              dout(0) << "linanqinqin child: child, not transfer" << dendl;
+              break;
+            }
+          }
+          // is_in_transfer = is_write_op && is_noop_write;
+          // dout(0) << "linanqinqin do_op transfer child " << oid.oid.name 
+          //         << " is_in_transfer=" << is_in_transfer << dendl;
+          // if (!is_in_transfer) {
+          //   // transfer_child_obc = obc;
+          //   break;
+          // }
+        }
+        // the child does not exist
+        else {
+          // this is a transfer write but the child does not exist
+          // do not perform this write
+          if (is_write_op && is_noop_write) {
+            osd->reply_op_error(op, -ENOENT);
+            return;
+          }
+        }
+      }
+      // the child does not exist
+      else {
+        // this is a transfer write but the child does not exist
+        // do not perform this write
+        if (is_write_op && is_noop_write) {
+          osd->reply_op_error(op, -ENOENT);
+          return;
+        }
+      }
+
+      // route to the parent otherwise, which includes:
+      // 1. the child object does not exist
+      // 2. the child object exists but transfer is already done
+      // 3. is_in_transfer=true
+      oid.oid.name = parent_oid_name;
+      r = find_object_context(
+        oid, &obc, can_create,
+        m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+        &missing_oid); 
+      dout(0) << "linanqinqin do_op transfer parent " << oid.oid.name 
+              << " is_in_transfer=" << is_in_transfer << dendl;
+    break;
+
     default:
-      dout(0) << "linanqinqin do_op client " << req_src_ip 
+      dout(10) << "linanqinqin do_op client " << req_src_ip 
               << " not registered to access " << oid.oid.name << dendl;
       osd->reply_op_error(op, -EPERM);
       return;
     }
   }
   else if(is_delete_child) {
-    oid.oid.name = get_child_oid_name(parent_oid_name);
-    r = find_object_context(
-      oid, &obc, can_create,
-      m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
-      &missing_oid);
+    dfork_access_t da_type = get_dfork_access_type(oid.oid.name, req_src_ip);
+
+    // if in transfer mode, removing parent objects that have child
+    if (da_type == DFORK_ACCESS_TRANSFER) {
+      r = find_object_context(
+        oid, &obc, can_create,
+        m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+        &missing_oid);
+
+      // now check the existence of the child
+      hobject_t& child_oid(oid);
+      hobject_t child_missing_oid;
+      ObjectContextRef child_obc;
+
+      child_oid.oid.name = get_child_oid_name(parent_oid_name);
+      find_object_context(
+        child_oid, &child_obc, false,
+        m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+        &child_missing_oid);
+
+      // only remove the parent if the child exists
+      if (child_obc) {
+        if (!(child_obc->obs.exists)) {
+          // obc->obs.exists = false;
+          // osd->reply_op_error(op, -EPERM);
+          // return;
+          is_noop_delete = true;
+        }
+      }
+      else {
+        // obc->obs.exists = false;
+        // osd->reply_op_error(op, -EPERM);
+        // return;
+        is_noop_delete = true;
+      }
+    }
+    // not in transfer mode, removing child objects
+    else {
+      oid.oid.name = get_child_oid_name(parent_oid_name);
+      r = find_object_context(
+        oid, &obc, can_create,
+        m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+        &missing_oid);
+
+      // // below is the old way of handling copy-back
+      // // check if in transfer
+      // // only need to do transfer when the child exists
+      // if (obc) {
+      //   if (obc->obs.exists) {
+      //     is_in_transfer = (get_dfork_access_type(parent_oid_name, req_src_ip) 
+      //                       == DFORK_ACCESS_TRANSFER);
+      //   }
+      // }
+    }
   }
   else {
     r = find_object_context(
@@ -2547,6 +2864,29 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
       m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
       &missing_oid);
   }
+
+  // if (is_write_op) {
+  //   if (obc) {
+  //     if (obc->obs.exists) {
+  //       if (obc->obs.oi.is_data_digest()) {
+  //         dout(0) << "linanqinqin do_op write " << oid.oid.name
+  //                 << " data_digest=" << obc->obs.oi.data_digest << dendl;
+  //       }
+  //       else {
+  //         dout(0) << "linanqinqin do_op write " << oid.oid.name
+  //                 << " no data_digest present" << dendl;
+  //       }
+  //     }
+  //     else {
+  //       dout(0) << "linanqinqin do_op write " << oid.oid.name
+  //               << " nonexistent" << dendl;
+  //     }
+  //   }
+  //   else {
+  //     dout(0) << "linanqinqin do_op write " << oid.oid.name
+  //             << " nonexistent" << dendl;
+  //   }
+  // }
 
   // const hobject_t& oid(oid);
   // if (oid.oid.name.find("rbd_data.") != std::string::npos) {
@@ -2760,6 +3100,56 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
       // dout(0) << "linanqinqin do_op cow " << ctx->parent_oid_name << " " << ctx->parent_oi_size << dendl;
     }
   }
+  else if (is_in_transfer) {
+
+    // // do transfer in delete (does not work)
+    // ctx->is_transfer = true;
+    // ctx->parent_oid_name = parent_oid_name;
+
+    hobject_t& child_oid(oid);
+    hobject_t child_missing_oid;
+
+    child_oid.oid.name = get_child_oid_name(parent_oid_name);
+    find_object_context(
+      child_oid, &(ctx->child_obc), false,
+      m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+      &child_missing_oid);
+
+    // if (ctx->child_obc) {
+    //   // only need to perform copy-back when the child object exists
+    //   // and its data_digest is not marked done
+    //   if (ctx->child_obc->obs.exists && 
+    //     (ctx->child_obc->obs.oi.data_digest != DFORK_TRANSFER_DONE)) {
+    //     ctx->is_transfer = true;
+    //   }
+
+    //   dout(0) << "linanqinqin is_in_transfer" 
+    //           << " exists=" << ctx->child_obc->obs.exists 
+    //           << " data_digest=" << ctx->child_obc->obs.oi.data_digest << dendl;
+    // }
+
+    // dout(0) << "linanqinqin is_in_transfer" 
+    //         << " is_transfer=" << ctx->is_transfer << dendl;
+
+    // the child obc is guaranteed to be valid due to a prior check
+    ctx->is_transfer = true;
+
+    // hobject_t& parent_oid(oid);
+    // hobject_t parent_missing_oid;
+
+    // // get the parent obc for information like oi.size and oi.expected_object_size 
+    // // for use in COW in do_osd_ops
+    // parent_oid.oid.name = parent_oid_name;
+    // find_object_context(
+    //   parent_oid, &(ctx->parent_obc), false,
+    //   m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
+    //   &parent_missing_oid);
+    // if (obc) {
+    //   if (obc->obs.exists) {
+    //     ctx->is_transfer = true;
+    //   }
+    // }
+  }
   else if (is_delete_op && !is_delete_child) {
 
     hobject_t& child_oid(oid);
@@ -2781,6 +3171,9 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
 
     // dout(0) << "linanqinqin do_op delete " << parent_oid_name 
     //         << " " << ctx->child_oid_name << dendl;
+  }
+  else if (is_delete_child) {
+    ctx->noop_delete = is_noop_delete;
   }
   // const hobject_t& __soid = ctx->new_obs.oi.soid;
   // if (__soid.oid.name.find("rbd_data.") != std::string::npos) {
@@ -2849,6 +3242,14 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
   }
 
   op->mark_started();
+  /* linanqinqin */
+  // if (is_primary() && (is_write_op || is_read_op)) {
+  //   if (is_in_transfer != is_in_dfork_transfer(oid.oid.name)) {
+  //     dout(0) << "linanqinqin do_op " << oid.oid.name 
+  //             << " transfer status does not match" << dendl;
+  //   }
+  // }
+  /* end */
 
   execute_ctx(ctx);
   utime_t prepare_latency = ceph_clock_now();
@@ -6422,6 +6823,12 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       /* linanqinqin */
       // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_READ " << soid.oid.name
       //         << " " << CEPH_OSD_OP_READ << dendl;
+        if (soid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0) {
+          dout(0) << "linanqinqin do_osd_ops read " << soid.oid.name 
+                  << " off=" << op.extent.offset 
+                  << " len=" << op.extent.length 
+                  << " is_transfer=" << (op.flags) << dendl;
+        }
       /* end */
       ++ctx->num_read;
       /* linanqinqin */
@@ -7168,6 +7575,101 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
             do_osd_ops(ctx, cow_ops);
           }
         }
+        else if (ctx->is_transfer) {
+          dout(20) << "linanqinqin do_osd_ops transfer " << soid.oid.name << dendl;
+
+          ctx->is_transfer = false;
+
+          // object_info_t& parent_oi = ctx->parent_obc->obs.oi;
+          // hobject_t& tmp_soid = oi.soid;
+          // std::string my_oid_name(tmp_soid.oid.name);
+          // uint64_t my_oi_size = oi.size;
+
+          // vector<OSDOp> cow_ops(1);
+          // OSDOp& cow_op = cow_ops[0];
+
+          // tmp_soid.oid.name = parent_oi.soid.oid.name;
+          // oi.size = parent_oi.size;
+          // cow_op.op.op = CEPH_OSD_OP_READ;
+          // cow_op.op.extent.offset = 0;
+          // cow_op.op.extent.length = 0;
+
+          // // read the parent data
+          // int r = do_osd_ops(ctx, cow_ops);
+          // dout(0) << "linanqinqin do_osd_ops transfer read " << soid.oid.name
+          //         << " r=" << r 
+          //         << " outdata.length=" << cow_op.outdata.length() << dendl;
+
+          object_info_t& child_oi = ctx->child_obc->obs.oi;
+          hobject_t& tmp_soid = oi.soid;
+          std::string my_oid_name(tmp_soid.oid.name);
+          uint64_t my_oi_size = oi.size;
+
+          vector<OSDOp> trans_ops(1);
+          OSDOp& trans_op = trans_ops[0];
+
+          tmp_soid.oid.name = child_oi.soid.oid.name;
+          oi.size = child_oi.size;
+          trans_op.op.op = CEPH_OSD_OP_READ;
+          trans_op.op.extent.offset = 0;
+          trans_op.op.extent.length = 0;
+
+          // read the child data
+          int r = do_osd_ops(ctx, trans_ops);
+          dout(0) << "linanqinqin do_osd_ops transfer read " << soid.oid.name
+                  << " r=" << r 
+                  << " outdata=" << trans_op.outdata.length() << dendl;
+
+          // // mark child as transfer done
+          // trans_op.op.op = CEPH_OSD_OP_WRITE;
+          // // make sure write is noop
+          // trans_op.op.extent.offset = 0;
+          // trans_op.op.extent.length = 0;
+          
+          // ctx->mark_done = true;
+          // do_osd_ops(ctx, trans_ops);
+
+          // /* write the child object to the parent */
+          // tmp_soid.oid.name = my_oid_name;
+          // oi.size = my_oi_size;
+          // oi.expected_object_size = child_oi.expected_object_size;
+          // oi.expected_write_size = oi.expected_object_size;
+
+          // // preparing the write
+          // trans_op.indata = std::move(trans_op.outdata);
+          // trans_op.op.op = CEPH_OSD_OP_WRITE;
+          // trans_op.op.extent.offset = 0;
+          // trans_op.op.extent.length = trans_op.indata.length();
+
+          // // write child data to parent
+          // do_osd_ops(ctx, trans_ops);
+
+          // // make sure the write is nop
+          // op.extent.offset = 0;
+          // op.extent.length = 0;
+          // osd_op.indata.clear();
+          // obs.oi.set_dfork_transfer_done();
+
+          /* write the child object to the parent */
+          tmp_soid.oid.name = my_oid_name;
+          oi.size = my_oi_size;
+          oi.expected_object_size = child_oi.expected_object_size;
+          oi.expected_write_size = oi.expected_object_size;
+
+          // preparing the write
+          osd_op.indata = std::move(trans_op.outdata);
+          // op.op = CEPH_OSD_OP_WRITE;
+          op.extent.offset = 0;
+          op.extent.length = osd_op.indata.length();
+          obs.oi.set_dfork_transfer_done();
+        }
+
+        if (soid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0) {
+          dout(0) << "linanqinqin do_osd_ops write " << soid.oid.name 
+                  << " off=" << op.extent.offset 
+                  << " len=" << op.extent.length 
+                  << " is_transfer=" << (op.flags) << dendl;
+        }
       /* end */
         __u32 seq = oi.truncate_seq;
   tracepoint(osd, do_osd_op_pre_write, osd->whoami, soid.oid.name.c_str(), soid.snap.val, oi.size, seq, op.extent.offset, op.extent.length, op.extent.truncate_size, op.extent.truncate_seq);
@@ -7255,6 +7757,21 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	    soid, op.extent.offset, op.extent.length, osd_op.indata, op.flags);
 	}
 
+  /* linanqinqin */
+  // if (soid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0
+  //     || soid.oid.name.rfind("drbd_data.", 0) == 0
+  //     || soid.oid.name.rfind("linanqinqin.", 0) == 0) {
+  //   // dout(0) << "linanqinqin do_osd_ops write " << soid.oid.name
+  //   //         << " flags=" << op.flags << dendl;
+  //   if (obs.oi.is_data_digest()) {
+  //     dout(0) << "linanqinqin do_osd_ops write data_digest=" << obs.oi.data_digest << dendl;
+  //   }
+  //   else {
+  //     dout(0) << "linanqinqin do_osd_ops write no data_digest present" << dendl;
+  //   }
+  // }
+  /* end */
+
 	if (op.extent.offset == 0 && op.extent.length >= oi.size
             && !skip_data_digest) {
 	  obs.oi.set_data_digest(osd_op.indata.crc32c(-1));
@@ -7267,6 +7784,22 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	} else {
 	  obs.oi.clear_data_digest();
         }
+
+  /* linanqinqin */
+  // if (soid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0
+  //     || soid.oid.name.rfind("drbd_data.", 0) == 0
+  //     || soid.oid.name.rfind("linanqinqin.", 0) == 0) {
+  //   // if (obs.oi.is_data_digest()) {
+  //     obs.oi.set_data_digest(666);
+  //   // }
+  // }
+
+  // if (ctx->mark_done) {
+  //   ctx->mark_done = false;
+  //   obs.oi.set_data_digest(DFORK_TRANSFER_DONE);
+  // }
+  /* end */
+
 	write_update_size_and_usage(ctx->delta_stats, oi, ctx->modified_ranges,
 				    op.extent.offset, op.extent.length);
 	ctx->clean_regions.mark_data_region_dirty(op.extent.offset, op.extent.length);
@@ -7548,6 +8081,59 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
         tmp_soid.oid.name = orig_oid_name;
         obs.exists = true;
       }
+      else if (ctx->noop_delete) {
+        result = 0;
+        break;
+      }
+      // // below tries to write back the child object upon deleting
+      // // however write op cannot be properly executed with DELETE op type
+      // else if (ctx->is_transfer) {
+
+      //   ctx->is_transfer = false;
+
+      //   vector<OSDOp> rb_ops(1);
+      //   OSDOp& rb_op = rb_ops[0];
+
+      //   rb_op.op.op = CEPH_OSD_OP_READ;
+      //   rb_op.op.extent.offset = 0;
+      //   rb_op.op.extent.length = 0;
+
+      //   // read out the child object
+      //   int r = do_osd_ops(ctx, rb_ops);
+      //   dout(0) << "linanqinqin transfer read on " << oi.soid.oid.name
+      //           << " r=" << r 
+      //           << " outdata.length=" << rb_op.outdata.length() << dendl;
+
+      //   hobject_t& tmp_soid = oi.soid;
+      //   std::string my_oid_name(tmp_soid.oid.name);
+      //   tmp_soid.oid.name = ctx->parent_oid_name;
+      //   // tmp_soid.oid.name = "linanqinqin.tmp";
+
+      //   // preparing the write
+      //   rb_op.indata = std::move(rb_op.outdata);
+      //   rb_op.op.op = CEPH_OSD_OP_WRITE;
+      //   rb_op.op.extent.offset = 0;
+      //   rb_op.op.extent.length = rb_op.indata.length();
+
+      //   // write child data to parent
+      //   r = do_osd_ops(ctx, rb_ops);
+      //   dout(0) << "linanqinqin transfer write on " << tmp_soid.oid.name 
+      //           << " offset=" << rb_op.op.extent.offset
+      //           << " length=" << rb_op.op.extent.length
+      //           << " r=" << r << dendl;
+
+      //   // rb_op.op.op = CEPH_OSD_OP_READ;
+      //   // rb_op.op.extent.offset = 0;
+      //   // rb_op.op.extent.length = 0;
+      //   // r = do_osd_ops(ctx, rb_ops);
+      //   // dout(0) << "linanqinqin transfer read again on " << oi.soid.oid.name
+      //   //         << " r=" << r 
+      //   //         << " outdata.length=" << rb_op.outdata.length() << dendl;
+
+      //   tmp_soid.oid.name = my_oid_name;
+
+      //   // dout(0) << "linanqinqin transfer delete on " << my_oid_name << dendl;
+      // }
 
       // dout(0) << "linanqinqin do_osd_op delete " << soid.oid.name << dendl;
     }

@@ -111,6 +111,8 @@ private:
   /* linanqinqin */
   // void send_set_dfork_dirty();
   // Context *handle_set_dfork_dirty(int *result);
+  int get_dfork_dirty();
+
   void send_v3_get_dirty_bit();
   Context *handle_v3_get_dirty_bit(int *result);
   int v3_get_dirty_bit();

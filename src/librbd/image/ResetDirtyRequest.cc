@@ -177,7 +177,12 @@ void ResetDirtyRequest<I>::send_reset_dfork_dirty() {
     comp->release();
   }
   else {
-    send_clear_dfork_dirty_v2_cache();
+
+    send_clear_dfork_dirty();
+
+    // // next, clear the dirty bit cache located on the object map node
+    // // (for v2, where dirty bit is calculated by the object map)
+    // send_clear_dfork_dirty_v2_cache();
   }
 }
 

@@ -615,13 +615,17 @@ public:
     object_stat_sum_t delta_stats;
 
     /* linanqinqin */
-    bool is_cow;  // is COW write for a data object
+    bool is_cow;           // is COW write for a data object
+    bool is_transfer;      // need to transfer child to parent
+    bool mark_done;        // need to mark the data_digest in transfer
     bool is_delete_parent; // deleting a parent data object
+    bool noop_delete;      // when in transfer, indicate that this parent obj should not be deleted
     // bool is_delete_child; // deleting only the child data object
-    // std::string parent_oid_name;
-    std::string child_oid_name;
+    std::string parent_oid_name;  // used by transfer delete 
+    std::string child_oid_name;     // used by delete
     // uint64_t parent_oi_size;
-    ObjectContextRef parent_obc;
+    ObjectContextRef parent_obc;    // used by COW
+    ObjectContextRef child_obc;     // used by transfer
     /* end */
 
     bool modify;          // (force) modification (even if op_t is empty)
@@ -736,7 +740,10 @@ public:
       new_obs(obs->oi, obs->exists),
       /* linanqinqin */
       is_cow(false),
+      is_transfer(false),
+      mark_done(false),
       is_delete_parent(false),
+      noop_delete(false),
       /* end */
       modify(false), user_modify(false), undirty(false), cache_operation(false),
       ignore_cache(false), ignore_log_op_stats(false), update_log_only(false),

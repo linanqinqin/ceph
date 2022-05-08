@@ -91,36 +91,36 @@ void CheckDirtyRequest<I>::send_check_dfork_dirty() {
   ldout(m_cct, LNQQ_DOUT_CheckDirtyReq_LVL) << __func__ << dendl;
 
   /* v2 dirty bit */
-  // librados::ObjectReadOperation op;
-  // cls_client::check_dfork_dirty_start(&op, m_block_on_clean);
-
-  // using klass = CheckDirtyRequest<I>;
-  // librados::AioCompletion *comp =
-  //   create_rados_callback<klass, &klass::handle_check_dfork_dirty>(this);
-  // /* linanqinqin */
-  // // ldout(cct, LNQQ_DOUT_CheckDirtyReq_LVL) << __func__ << ": " << m_header_oid << dendl;
-  // /* end */
-
-  // m_header_obj = util::header_name(m_image_id);
-  // m_out_bl.clear();
-  // int r = m_io_ctx.aio_operate(m_header_obj, comp, &op, &m_out_bl);
-  // ceph_assert(r == 0);
-  // comp->release();
-  /* v2 dirty bit end */
-
-  /* v3 dirty bit */
   librados::ObjectReadOperation op;
-  cls_client::check_dirty_bit_v3_start(&op, m_block_on_clean, m_from_omap);
+  cls_client::check_dfork_dirty_start(&op, m_block_on_clean);
 
   using klass = CheckDirtyRequest<I>;
   librados::AioCompletion *comp =
     create_rados_callback<klass, &klass::handle_check_dfork_dirty>(this);
+  /* linanqinqin */
+  // ldout(cct, LNQQ_DOUT_CheckDirtyReq_LVL) << __func__ << ": " << m_header_oid << dendl;
+  /* end */
 
-  std::string omap_oid(ObjectMap<>::object_map_name(m_image_id, CEPH_NOSNAP));
+  m_header_obj = util::header_name(m_image_id);
   m_out_bl.clear();
-  int r = m_io_ctx.aio_operate(omap_oid, comp, &op, &m_out_bl);
+  int r = m_io_ctx.aio_operate(m_header_obj, comp, &op, &m_out_bl);
   ceph_assert(r == 0);
   comp->release();
+  /* v2 dirty bit end */
+
+  /* v3 dirty bit */
+  // librados::ObjectReadOperation op;
+  // cls_client::check_dirty_bit_v3_start(&op, m_block_on_clean, m_from_omap);
+
+  // using klass = CheckDirtyRequest<I>;
+  // librados::AioCompletion *comp =
+  //   create_rados_callback<klass, &klass::handle_check_dfork_dirty>(this);
+
+  // std::string omap_oid(ObjectMap<>::object_map_name(m_image_id, CEPH_NOSNAP));
+  // m_out_bl.clear();
+  // int r = m_io_ctx.aio_operate(omap_oid, comp, &op, &m_out_bl);
+  // ceph_assert(r == 0);
+  // comp->release();
   /* v3 dirty bit end */
 }
 
@@ -132,9 +132,9 @@ void CheckDirtyRequest<I>::handle_check_dfork_dirty(int r) {
   if (r == 0) {
     auto it = m_out_bl.cbegin();
     // v2 dirty bit
-    // r = cls_client::check_dfork_dirty_finish(&it, m_dirty);
+    r = cls_client::check_dfork_dirty_finish(&it, m_dirty);
     // v3 dirty bit
-    r = cls_client::check_dirty_bit_v3_finish(&it, m_dirty);
+    // r = cls_client::check_dirty_bit_v3_finish(&it, m_dirty);
   }
 
   if (r < 0) {

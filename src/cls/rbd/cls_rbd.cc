@@ -1265,7 +1265,7 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
 
     dfork_dirty_mtx.unlock();
 
-    // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin set_dfork_dirty blocked");
+    CLS_LOG(0, "linanqinqin set_dfork_dirty blocked");
     return -EPERM;
   }
 
@@ -1301,8 +1301,8 @@ int set_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out) 
       return r;
     }
 
-    // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin new loc string: %s", 
-    //         orig_locations.c_str());
+    CLS_LOG(0, "linanqinqin new loc string: %s", 
+            orig_locations.c_str());
   }
   
   // check that the dirty bit exists to make sure this is a header object
@@ -1372,6 +1372,7 @@ int check_dfork_dirty(cls_method_context_t hctx, bufferlist *in, bufferlist *out
 
   if (!dirty && block_on_clean) {
     // add the image id to the block set
+    // TODO: this needs to be made persistent as well
     block_set.insert(image_id);
     CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin blocking %s!!!", image_id.c_str());
   }
@@ -1418,12 +1419,13 @@ int get_dfork_dirty_locations(cls_method_context_t hctx, bufferlist *in, bufferl
   // CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s is here", oid.c_str());
 
   // the lock will be released at a later call of xxx
+  CLS_LOG(0, "linanqinqin %s acquiring the lock", __func__);
   dfork_dirty_mtx.lock();
 
   std::string dirty_locations;
   int r = read_key(hctx, "dfork_dirty_locations", &dirty_locations);
   if (r < 0) {
-    dfork_dirty_mtx.unlock();
+    // dfork_dirty_mtx.unlock(); // no need to unlock here
     CLS_ERR("Could not read image's dirty bit locations off disk: %s", 
             cpp_strerror(r).c_str());
     return r;
@@ -1499,6 +1501,7 @@ int clear_dfork_dirty_locations(cls_method_context_t hctx, bufferlist *in, buffe
   try {
     decode(do_erase, iter);
   } catch (const ceph::buffer::error &err) {
+    dfork_dirty_mtx.unlock();
     return -EINVAL;
   }
 
@@ -1517,6 +1520,7 @@ int clear_dfork_dirty_locations(cls_method_context_t hctx, bufferlist *in, buffe
     }
   }
 
+  CLS_LOG(0, "linanqinqin %s releasing the lock", __func__);
   dfork_dirty_mtx.unlock();
 
   return 0;
@@ -4193,16 +4197,20 @@ int unblock_dirty_bit_updates_v3(cls_method_context_t hctx, bufferlist *in, buff
 }
 
 /**
+ * (This is the old version where the switch is global to all clients.
+ * In other words, once turned on, all access to a specific image is 
+ * in dfork mode)
  * Switch on/off the dfork mode for a given image
  * Entries are written to /mnt/ceph/dfork/
  *
  * Input:
  * @param switch_on switch on/off dfork mode for a specific image
+ * @param do_all switch off for all images
  *
  * Output:
  * @return 0 on success, negative error code on failure
  */
-int dfork_switch(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+int dfork_switch_old(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
   bool switch_on;
   bool do_all;
@@ -4280,6 +4288,116 @@ int dfork_switch(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
         return 0;
       }
     }
+  }
+}
+
+/**
+ * Switch on/off the parent/child access mode for a given image and for the calling client
+ * The IP of the client is written to /mnt/ceph/dfork/<image_id>/
+ * A directory if parent, a regular file if child
+ *
+ * Input:
+ * @param switch_on switch on/off access mode for a specific image
+ * @param do_all (ignored)
+ * @param is_child true if child mode, else parent mode
+ *
+ * Output:
+ * @return 0 on success, negative error code on failure
+ */
+int dfork_switch(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
+
+  bool switch_on;
+  bool do_all;
+  bool is_child;
+  int r;
+  const std::string image_id = cls_get_target_rbd_image_name(hctx);
+  const std::string src_ip = cls_get_request_src_ip(hctx);
+  const std::string entry_dir("/etc/ceph/dfork/");
+  std::string entry_path(entry_dir + image_id);
+
+  // taking input
+  auto iter = in->cbegin();
+  try {
+    decode(switch_on, iter);
+    decode(do_all, iter);
+    decode(is_child, iter);
+  } catch (const ceph::buffer::error &err) {
+    return -EINVAL;
+  }
+
+  // // do_all ignored
+  // if (switch_on && do_all) {
+  //   CLS_ERR("linanqinqin %s: switching on dfork mode for all images not supported", 
+  //           __func__);
+  //   return -EOPNOTSUPP;
+  // }
+
+  CLS_LOG(LNQQ_DOUT_cls_rbd_LVL, "linanqinqin %s: switching %s %s mode for %s:%s", 
+          __func__, switch_on?"on":"off", is_child?"child":"parent", 
+          image_id.c_str(), src_ip.c_str());
+
+  // if (!do_all) {
+  //   // check the existence of the image
+  //   uint64_t size;
+  //   r = read_key(hctx, "size", &size);
+  //   if (r < 0) {
+  //     CLS_ERR("linanqinqin %s: failed to switch on dfork mode for %s: %s", 
+  //             __func__, image_id.c_str(), cpp_strerror(r).c_str());
+  //     return r;
+  //   }
+  // }
+
+  // check the existence of the image
+  uint64_t size;
+  r = read_key(hctx, "size", &size);
+  if (r < 0) {
+    CLS_ERR("linanqinqin %s: failed to switch on dfork mode for %s: %s", 
+            __func__, image_id.c_str(), cpp_strerror(r).c_str());
+    return r;
+  }
+
+  if (switch_on) {
+    const std::string mkdir_str("mkdir -p " + entry_path);
+    entry_path += "/" + src_ip;
+    const std::string cmd_str((is_child?"touch ":"mkdir ") + entry_path);
+
+    std::system(mkdir_str.c_str());
+    std::system(cmd_str.c_str());
+
+    // verify the entry existence
+    struct stat __buf;
+    r = stat(entry_path.c_str(), &__buf);
+    if (r < 0) {
+      CLS_ERR("linanqinqin %s: failed to switch on dfork mode for %s: %s", 
+              __func__, image_id.c_str(), cpp_strerror(r).c_str());
+    }
+    return r;
+  }
+  else {
+    entry_path += "/" + src_ip;
+    const std::string cmd_str("rm -rf " + entry_path);
+    struct stat __buf;
+    r = stat(entry_path.c_str(), &__buf);
+
+    if (r == 0) {
+      if ((S_ISDIR(__buf.st_mode) && (!is_child)) || 
+          ((!S_ISDIR(__buf.st_mode)) && is_child)) {
+        // delete the entry
+        std::system(cmd_str.c_str());
+        // verify the entry is gone
+        r = stat(entry_path.c_str(), &__buf);
+        if (r == 0) {
+          CLS_ERR("linanqinqin %s: failed to switch off dfork mode for %s: failed to remove the entry", 
+                  __func__, image_id.c_str());
+          return -EBUSY;
+        }
+        else {
+          return 0;
+        }
+      }
+    }
+
+    return 0;
   }
 }
 /* end */

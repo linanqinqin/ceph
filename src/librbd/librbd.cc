@@ -577,9 +577,9 @@ namespace librbd {
   }
 
   int RBD::dfork_switch(IoCtx& io_ctx, const std::string &name, 
-                        const std::string &id, bool switch_on, bool do_all) {
+                        const std::string &id, bool switch_on, bool do_all, bool is_child) {
 
-    int r = librbd::dfork_switch(io_ctx, name, id, switch_on, do_all);
+    int r = librbd::dfork_switch(io_ctx, name, id, switch_on, do_all, is_child);
     return r;
   }
 
@@ -600,6 +600,13 @@ namespace librbd {
     // tracepoint(librbd, remove_enter, io_ctx.get_pool_name().c_str(), io_ctx.get_id(), name);
     int r = librbd::dfork_remove(io_ctx, name, pctx);
     // tracepoint(librbd, remove_exit, r);
+    return r;
+  }
+
+  int RBD::dfork_transfer(IoCtx& io_ctx, const std::string &name, 
+                          const std::string &id) {
+
+    int r = librbd::dfork_transfer(io_ctx, name, id);
     return r;
   }
   /* end */
@@ -1744,6 +1751,14 @@ namespace librbd {
     ImageCtx *ictx = (ImageCtx *)ctx;
     int r = librbd::get_dirty(ictx, dirty);
     return r;
+  }
+
+  uint64_t Image::get_object_map_size() {
+    // ImageCtx *ictx = reinterpret_cast<ImageCtx*>(ctx);
+    ImageCtx *ictx = (ImageCtx *)ctx;
+
+    // return ictx->get_object_count(CEPH_NOSNAP);
+    return ictx->object_may_exist(0);
   }
   /* end */
 

@@ -51,6 +51,7 @@
 #include "librbd/image/ResetDirtyRequest.h"
 #include "librbd/image/DforkSwitchRequest.h"
 #include "librbd/image/DforkRemoveRequest.h"
+#include "librbd/image/DforkTransferRequest.h"
 /* end */
 #include "librbd/image/Types.h"
 #include "librbd/io/AioCompletion.h"
@@ -956,12 +957,12 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
   }
 
   int dfork_switch(IoCtx& io_ctx, const std::string &image_name,
-                   const std::string &image_id, bool switch_on, bool do_all) {
+                   const std::string &image_id, bool switch_on, bool do_all, bool is_child) {
 
     C_SaferCond cond;
     image::DforkSwitchRequest<> *req = image::DforkSwitchRequest<>::create(
                                        io_ctx, image_name, image_id, 
-                                       switch_on, do_all, &cond);
+                                       switch_on, do_all, is_child, &cond);
     req->send();
     int r = cond.wait();
 
@@ -973,6 +974,18 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
     C_SaferCond cond;
     image::DforkRemoveRequest<> *req = image::DforkRemoveRequest<>::create(
                                        io_ctx, name, pctx, &cond);
+    req->send();
+    int r = cond.wait();
+
+    return r;
+  }
+
+  int dfork_transfer(IoCtx& io_ctx, const std::string &image_name,
+                     const std::string &image_id) {
+
+    C_SaferCond cond;
+    image::DforkTransferRequest<> *req = image::DforkTransferRequest<>::create(
+                                       io_ctx, image_name, image_id, &cond);
     req->send();
     int r = cond.wait();
 

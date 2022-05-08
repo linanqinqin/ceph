@@ -88,6 +88,7 @@ set(librbd_internal_srcs
   image/DetachParentRequest.cc
   image/DforkRemoveRequest.cc
   image/DforkSwitchRequest.cc
+  image/DforkTransferRequest.cc
   image/GetMetadataRequest.cc
   image/ListWatchersRequest.cc
   image/OpenRequest.cc

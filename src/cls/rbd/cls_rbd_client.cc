@@ -231,6 +231,22 @@ int get_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty) {
   return 0;
 }
 
+int get_dfork_dirty(librados::IoCtx *ioctx, const std::string &oid,
+                    uint8_t *dirty)
+{
+  librados::ObjectReadOperation op;
+  get_dfork_dirty_start(&op);
+
+  bufferlist out_bl;
+  int r = ioctx->operate(oid, &op, &out_bl);
+  if (r < 0) {
+    return r;
+  }
+
+  auto it = out_bl.cbegin();
+  return get_dfork_dirty_finish(&it, dirty);
+}
+
 void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty, 
                      const std::string &location_oid) {
   bufferlist bl;
@@ -350,10 +366,12 @@ void unblock_dirty_bit_updates_v3(librados::ObjectWriteOperation *op) {
   op->exec("rbd", "unblock_dirty_bit_updates_v3", bl);
 }
 
-void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, bool do_all) {
+void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, bool do_all, 
+                  bool is_child) {
   bufferlist bl;
   encode(switch_on, bl);
   encode(do_all, bl);
+  encode(is_child, bl);
   op->exec("rbd", "dfork_switch", bl);
 }
 /* end */

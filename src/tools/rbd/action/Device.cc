@@ -4,6 +4,11 @@
 #include "acconfig.h"
 #include "tools/rbd/ArgumentTypes.h"
 #include "tools/rbd/Shell.h"
+/* linanqinqin */
+#include "tools/rbd/Utils.h"
+#include "common/errno.h"
+#include <iostream>
+/* end */
 
 #include <boost/program_options.hpp>
 
@@ -142,6 +147,53 @@ const DeviceOperations *get_device_operations(const po::variables_map &vm) {
 
 } // anonymous namespace
 
+/* linanqinqin */
+static int do_reset_dfork_dirty(const std::string &pool_name, 
+                                const std::string &namespace_name, 
+                                const std::string &image_name,
+                                const std::string &image_id) {
+  librados::Rados rados;
+  librados::IoCtx io_ctx;
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = rbd.reset_dfork_dirty(io_ctx, image_name, image_id);
+  if (r < 0) {
+    std::cerr << "rbd: error resetting dfork dirty: "
+              << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
+static int do_dfork_switch(const std::string &pool_name, 
+                           const std::string &namespace_name,  
+                           const std::string &image_name, 
+                           const std::string &image_id, 
+                           bool switch_on, 
+                           bool do_all, 
+                           bool is_child) {
+  librados::Rados rados; 
+  librados::IoCtx io_ctx;
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx);
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = rbd.dfork_switch(io_ctx, image_name, image_id, switch_on, do_all, is_child);
+  if (r < 0) {
+    std::cerr << "rbd: error switching dfork mode: "
+              << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+/* end */
+
 void get_list_arguments(po::options_description *positional,
                         po::options_description *options) {
   add_device_type_option(options);
@@ -168,8 +220,98 @@ void get_map_arguments(po::options_description *positional,
 
 int execute_map(const po::variables_map &vm,
                 const std::vector<std::string> &ceph_global_init_args) {
+  /* linanqinqin */
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_name;
+  std::string snap_name;
+  std::string image_id;
+  int r;
+
+  if (vm.count(at::IMAGE_ID)) {
+    image_id = vm[at::IMAGE_ID].as<std::string>();
+  }
+
+  r = utils::get_pool_image_snapshot_names(
+    vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
+    &image_name, &snap_name, image_id.empty(),
+    utils::SNAPSHOT_PRESENCE_NONE, utils::SPEC_VALIDATION_NONE);
+  if (r < 0) {
+    return r;
+  }
+
+  if (!image_id.empty() && !image_name.empty()) {
+    std::cerr << "rbd: trying to access image using both name and id. "
+              << std::endl;
+    return -EINVAL;
+  }
+  if (!snap_name.empty()) {
+    std::cerr << "rbd: operation not supported on snapshots. "
+              << std::endl;
+    return -EINVAL;
+  }
+
+  r = do_dfork_switch(pool_name, namespace_name, 
+                      image_name, image_id, true, false, false);
+  if (r < 0) {
+    return r;
+  }
+
+  /* end */
   return (*get_device_operations(vm)->execute_map)(vm, ceph_global_init_args);
 }
+
+/* linanqinqin */
+int execute_super(const po::variables_map &vm,
+                  const std::vector<std::string> &ceph_global_init_args) {
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_name;
+  std::string snap_name;
+  std::string image_id;
+  int r;
+
+  if (vm.count(at::IMAGE_ID)) {
+    image_id = vm[at::IMAGE_ID].as<std::string>();
+  }
+
+  r = utils::get_pool_image_snapshot_names(
+    vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
+    &image_name, &snap_name, image_id.empty(),
+    utils::SNAPSHOT_PRESENCE_NONE, utils::SPEC_VALIDATION_NONE);
+  if (r < 0) {
+    return r;
+  }
+
+  if (!image_id.empty() && !image_name.empty()) {
+    std::cerr << "rbd: trying to access image using both name and id. "
+              << std::endl;
+    return -EINVAL;
+  }
+  if (!snap_name.empty()) {
+    std::cerr << "rbd: operation not supported on snapshots. "
+              << std::endl;
+    return -EINVAL;
+  }
+
+  // reset the dirty bit
+  r = do_reset_dfork_dirty(pool_name.c_str(), namespace_name.c_str(), 
+                           image_name.c_str(), image_id.c_str());
+  if (r < 0) {
+    return r;
+  }
+  // turn on dfork mode
+  r = do_dfork_switch(pool_name, namespace_name, 
+                      image_name, image_id, true, false, true);
+  if (r < 0) {
+    return r;
+  }
+
+  return (*get_device_operations(vm)->execute_map)(vm, ceph_global_init_args);
+}
+/* end */
 
 void get_unmap_arguments(po::options_description *positional,
                          po::options_description *options) {
@@ -201,6 +343,12 @@ Shell::Action action_ls(
 Shell::Action action_map(
   {"device", "map"}, {"map"}, "Map an image to a block device.", "",
   &get_map_arguments, &execute_map);
+
+/* linanqinqin */
+Shell::Action action_super(
+  {"dfork", "super"}, {"super"}, "Create a disk superposition and map the image to a block device", "",
+  &get_map_arguments, &execute_super);
+/* end */
 
 Shell::Action action_unmap(
   {"device", "unmap"}, {"unmap"}, "Unmap a rbd device.", "",

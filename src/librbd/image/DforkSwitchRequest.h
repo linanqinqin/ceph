@@ -26,9 +26,10 @@ public:
                                     const std::string &image_id, 
                                     bool switch_on, 
                                     bool do_all, 
+                                    bool is_child, 
                                     Context *on_finish) {
     return new DforkSwitchRequest(ioctx, image_name, image_id, 
-                                  switch_on, do_all, on_finish);
+                                  switch_on, do_all, is_child, on_finish);
   }
 
   void send();
@@ -45,6 +46,7 @@ private:
                      const std::string &image_id, 
                      bool switch_on,  
                      bool do_all, 
+                     bool is_child, 
                      Context *on_finish);
 
   // ImageCtxT *m_image_ctx;
@@ -55,6 +57,7 @@ private:
 
   bool m_switch_on;
   bool m_do_all;
+  bool m_is_child; 
 
   Context *m_on_finish;
 

@@ -264,10 +264,11 @@ public:
   int unblock_dfork_dirty(IoCtx& io_ctx, const std::string &name, const std::string &id);
   int reset_dfork_dirty(IoCtx& io_ctx, const std::string &name, const std::string &id);
   int dfork_switch(IoCtx& io_ctx, const std::string &name, const std::string &id, 
-                   bool switch_on, bool do_all);
+                   bool switch_on, bool do_all, bool is_child);
   int dfork_remove(IoCtx& io_ctx, const std::string &name);
   int dfork_remove_with_progress(IoCtx& io_ctx, const std::string &name,
                                       ProgressContext& pctx);
+  int dfork_transfer(IoCtx& io_ctx, const std::string &name, const std::string &id);
   /* end */
   int aio_open(IoCtx& io_ctx, Image& image, const char *name,
 	       const char *snapname, RBD::AioCompletion *c);
@@ -589,6 +590,10 @@ public:
   int rebuild_object_map(ProgressContext &prog_ctx);
 
   int check_object_map(ProgressContext &prog_ctx);
+
+  /* linanqinqin */
+  uint64_t get_object_map_size();
+  /* end */
 
   int copy(IoCtx& dest_io_ctx, const char *destname);
   int copy2(Image& dest);

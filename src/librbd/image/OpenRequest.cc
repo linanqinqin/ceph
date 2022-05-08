@@ -343,18 +343,27 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
 
   /* linanqinqin */
   // send_set_dfork_dirty();
-  if (v3_get_dirty_bit()) {
+
+  // if (v3_get_dirty_bit()) {
+  //   lderr(cct) << "failed to retrieve the v3 dirty bit: "
+  //              << cpp_strerror(*result) << dendl;
+  //   send_close_image(*result);
+  //   return nullptr;
+  // }
+
+  if (get_dfork_dirty()) {
     lderr(cct) << "failed to retrieve the dirty bit: "
                << cpp_strerror(*result) << dendl;
     send_close_image(*result);
     return nullptr;
   }
-  // if (get_object_map()) {
-  //   lderr(cct) << "failed to read the object map: "
-  //              << cpp_strerror(*result) << dendl;
-  //   send_close_image(*result);
-  //   return nullptr;
-  // }
+  
+  if (get_object_map()) {
+    lderr(cct) << "failed to read the object map: "
+               << cpp_strerror(*result) << dendl;
+    send_close_image(*result);
+    return nullptr;
+  }
   /* end */
 
   if (m_image_ctx->test_features(RBD_FEATURE_STRIPINGV2)) {
@@ -380,12 +389,25 @@ int OpenRequest<I>::get_object_map() {
   std::string objmap_str;
   auto it = object_map.begin();
   auto end_it = object_map.end();
+  // int cnt_nonexistent=0, cnt_exists=0, cnt_pending=0, cnt_clean=0;
+  int obj_cnt[4] = {0};
+  int obj_total = 0;
   for (; it != end_it; ++it) {
-    objmap_str += *it+'0';
+    // objmap_str += *it+'0';
+    // if (*it == OBJECT_EXISTS || *it == OBJECT_PENDING) {
+    //   obj_dirty += 1;
+    // }
+    obj_total += 1;
+    obj_cnt[*it] += 1;
   }
 
   std::cout << "linanqinqin object_map for " << m_image_ctx->id << ": " 
-            << objmap_str << std::endl;
+            << obj_total << " "
+            << obj_cnt[0] << " " 
+            << obj_cnt[1] << " " 
+            << obj_cnt[2] << " " 
+            << obj_cnt[3] << " " 
+            << std::endl;
 
   return r;
 }
@@ -424,6 +446,14 @@ int OpenRequest<I>::get_object_map() {
 
 //   return nullptr;
 // }
+
+template <typename I>
+int OpenRequest<I>::get_dfork_dirty() {
+
+  return cls_client::get_dfork_dirty(&(m_image_ctx->md_ctx), 
+                                     m_image_ctx->header_oid, 
+                                     &m_image_ctx->dirty);
+}
 
 template <typename I>
 void OpenRequest<I>::send_v3_get_dirty_bit() {

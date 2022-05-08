@@ -476,7 +476,8 @@ enum {
 	CEPH_OSD_FLAG_IGNORE_REDIRECT = 0x2000000,  /* ignore redirection */
 	CEPH_OSD_FLAG_RETURNVEC = 0x4000000, /* allow overall result >= 0, and return >= 0 and buffer for each op in opvec */
 	/* linanqinqin */
-	CEPH_OSD_FLAG_DFORK_REMOVE = 0x8000000, /* delete only dfork objects */
+	CEPH_OSD_FLAG_DFORK_REMOVE = 0x8000000, /* delete only dfork child objects */
+	// CEPH_OSD_FLAG_DFORK_REMOVE_PARENT = 0x10000000, /* delete only dfork parent objects if child exists */
 	/* end */
 };
 
@@ -490,6 +491,9 @@ enum {
 	CEPH_OSD_OP_FLAG_FADVISE_NOCACHE   = 0x40, /* data will be accessed only once by this client */
 	CEPH_OSD_OP_FLAG_WITH_REFERENCE   = 0x80, /* need reference couting */
 	CEPH_OSD_OP_FLAG_BYPASS_CLEAN_CACHE = 0x100, /* bypass ObjectStore cache, mainly for deep-scrub */
+	/* linanqinqin */
+	CEPH_OSD_OP_FLAG_DFORK_TRANSFER = 0x200, /* the op(write) is for dfork transfer */
+	/* end */
 };
 
 #define EOLDSNAPC    85  /* ORDERSNAP flag set; writer has old snapc*/

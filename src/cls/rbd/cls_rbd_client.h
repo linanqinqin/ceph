@@ -59,6 +59,8 @@ void set_size(librados::ObjectWriteOperation *op, uint64_t size);
 /* linanqinqin */
 void get_dfork_dirty_start(librados::ObjectReadOperation *op);
 int get_dfork_dirty_finish(bufferlist::const_iterator *it, uint8_t *dirty);
+int get_dfork_dirty(librados::IoCtx *ioctx, const std::string &oid,
+                    uint8_t *dirty);
 void set_dfork_dirty(librados::ObjectWriteOperation *op, uint8_t dirty, 
                      const std::string &location_oid);
 void check_dfork_dirty_start(librados::ObjectReadOperation *op, bool block);
@@ -82,7 +84,8 @@ int check_dirty_bit_v3_finish(bufferlist::const_iterator *it, uint8_t *dirty);
 void unblock_dirty_bit_updates_v3(librados::ObjectWriteOperation *op);
 
 // new dfork design (improving cow performance)
-void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, bool do_all);
+void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, bool do_all, 
+                  bool is_child);
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id);

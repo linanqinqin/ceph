@@ -891,6 +891,14 @@ static int do_import(librados::Rados &rados, librbd::RBD &rbd,
     goto done;
   }
 
+  /* linanqinqin */
+  r = rbd.dfork_switch(io_ctx, imgname, "", true, false, false);
+  if (r < 0) {
+    std::cerr << "rbd: image switch on parent mode failed" << std::endl;
+    goto done;
+  }
+  /* end */
+
   r = rbd.open(io_ctx, image, imgname);
   if (r < 0) {
     std::cerr << "rbd: failed to open image" << std::endl;

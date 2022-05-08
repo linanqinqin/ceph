@@ -285,6 +285,10 @@ namespace librbd {
     int is_snap_unprotected(librados::snap_t in_snap_id,
 			    bool *is_unprotected) const;
 
+    /* linanqinqin */
+    bool object_may_exist(uint64_t num) const;
+    /* end */
+
     uint64_t get_current_size() const;
     uint64_t get_object_size() const;
     string get_object_name(uint64_t num) const;

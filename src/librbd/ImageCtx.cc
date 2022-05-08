@@ -40,6 +40,11 @@
 #include "osdc/Striper.h"
 #include <boost/algorithm/string/predicate.hpp>
 
+/* linanqinqin */
+#define LNQQ_DOUT_ImageCtx_LVL 100
+#define LNQQ_DOUT_ImageCtx_LVL2 100
+/* end */
+
 #define dout_subsys ceph_subsys_rbd
 #undef dout_prefix
 #define dout_prefix *_dout << "librbd::ImageCtx: "
@@ -124,9 +129,16 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
       asok_hook(nullptr),
       trace_endpoint("librbd")
   {
-    ldout(cct, 10) << this << " " << __func__ << ": "
-                   << "image_name=" << image_name << ", "
-                   << "image_id=" << image_id << dendl;
+    /* linanqinqin: original */
+    // ldout(cct, 10) << this << " " << __func__ << ": "
+    //                << "image_name=" << image_name << ", "
+    //                << "image_id=" << image_id << dendl;
+    /* end */
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << ": "
+                  << "image_name=" << image_name << ", "
+                  << "image_id=" << image_id << dendl;
+    /* end */
 
     if (snap)
       snap_name = snap;
@@ -150,11 +162,19 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   ImageCtx::ImageCtx(const string &image_name, const string &image_id,
 		     uint64_t snap_id, IoCtx& p, bool ro)
     : ImageCtx(image_name, image_id, "", p, ro) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     open_snap_id = snap_id;
   }
 
   ImageCtx::~ImageCtx() {
-    ldout(cct, 10) << this << " " << __func__ << dendl;
+    /* linanqinqin: original */
+    // ldout(cct, 10) << this << " " << __func__ << dendl;
+    /* end */
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
 
     ceph_assert(config_watcher == nullptr);
     ceph_assert(image_watcher == NULL);
@@ -185,6 +205,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   void ImageCtx::init() {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(!header_oid.empty());
     ceph_assert(old_format || !id.empty());
 
@@ -205,6 +228,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   void ImageCtx::shutdown() {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     delete image_watcher;
     image_watcher = nullptr;
 
@@ -214,6 +240,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   void ImageCtx::init_layout(int64_t pool_id)
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     if (stripe_unit == 0 || stripe_count == 0) {
       stripe_unit = 1ull << order;
       stripe_count = 1;
@@ -249,6 +278,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   void ImageCtx::perf_start(string name) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     auto perf_prio = PerfCountersBuilder::PRIO_DEBUGONLY;
     if (child == nullptr) {
       // ensure top-level IO stats are exported for librbd daemons
@@ -300,16 +332,25 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   void ImageCtx::perf_stop() {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(perfcounter);
     cct->get_perfcounters_collection()->remove(perfcounter);
     delete perfcounter;
   }
 
   void ImageCtx::set_read_flag(unsigned flag) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     extra_read_flags |= flag;
   }
 
   int ImageCtx::get_read_flags(snap_t snap_id) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     int flags = librados::OPERATION_NOFLAG | read_flags;
     if (flags != 0)
       return flags;
@@ -326,6 +367,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   int ImageCtx::snap_set(uint64_t in_snap_id) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_wlocked(image_lock));
     auto it = snap_info.find(in_snap_id);
     if (in_snap_id != CEPH_NOSNAP && it != snap_info.end()) {
@@ -344,6 +388,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   void ImageCtx::snap_unset()
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_wlocked(image_lock));
     snap_id = CEPH_NOSNAP;
     snap_namespace = {};
@@ -358,6 +405,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   snap_t ImageCtx::get_snap_id(const cls::rbd::SnapshotNamespace& in_snap_namespace,
                                const string& in_snap_name) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     auto it = snap_ids.find({in_snap_namespace, in_snap_name});
     if (it != snap_ids.end()) {
@@ -368,6 +418,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   const SnapInfo* ImageCtx::get_snap_info(snap_t in_snap_id) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     map<snap_t, SnapInfo>::const_iterator it =
       snap_info.find(in_snap_id);
@@ -379,6 +432,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   int ImageCtx::get_snap_name(snap_t in_snap_id,
 			      string *out_snap_name) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     const SnapInfo *info = get_snap_info(in_snap_id);
     if (info) {
@@ -391,6 +447,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   int ImageCtx::get_snap_namespace(snap_t in_snap_id,
 				   cls::rbd::SnapshotNamespace *out_snap_namespace) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     const SnapInfo *info = get_snap_info(in_snap_id);
     if (info) {
@@ -403,6 +462,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   int ImageCtx::get_parent_spec(snap_t in_snap_id,
 				cls::rbd::ParentImageSpec *out_pspec) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     const SnapInfo *info = get_snap_info(in_snap_id);
     if (info) {
       *out_pspec = info->parent.spec;
@@ -411,59 +473,98 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
     return -ENOENT;
   }
 
+  /* linanqinqin */
+  bool ImageCtx::object_may_exist(uint64_t num) const {
+    return object_map->object_may_exist(num);
+  }
+  /* end */
+
   uint64_t ImageCtx::get_current_size() const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     return size;
   }
 
   uint64_t ImageCtx::get_object_size() const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return 1ull << order;
   }
 
   string ImageCtx::get_object_name(uint64_t num) const {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return util::data_object_name(this, num);
   }
 
   uint64_t ImageCtx::get_stripe_unit() const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return stripe_unit;
   }
 
   uint64_t ImageCtx::get_stripe_count() const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return stripe_count;
   }
 
   uint64_t ImageCtx::get_stripe_period() const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return stripe_count * (1ull << order);
   }
 
   utime_t ImageCtx::get_create_timestamp() const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return create_timestamp;
   }
 
   utime_t ImageCtx::get_access_timestamp() const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return access_timestamp;
   }
 
   utime_t ImageCtx::get_modify_timestamp() const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return modify_timestamp;
   }
 
   void ImageCtx::set_access_timestamp(utime_t at)
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_wlocked(timestamp_lock));
     access_timestamp = at;
   }
 
   void ImageCtx::set_modify_timestamp(utime_t mt)
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(timestamp_lock));
     modify_timestamp = mt;
   }
@@ -471,6 +572,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   int ImageCtx::is_snap_protected(snap_t in_snap_id,
 				  bool *is_protected) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     const SnapInfo *info = get_snap_info(in_snap_id);
     if (info) {
@@ -484,6 +588,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   int ImageCtx::is_snap_unprotected(snap_t in_snap_id,
 				    bool *is_unprotected) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     const SnapInfo *info = get_snap_info(in_snap_id);
     if (info) {
@@ -501,6 +608,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
                           uint8_t protection_status, uint64_t flags,
                           utime_t timestamp)
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_wlocked(image_lock));
     snaps.push_back(id);
     SnapInfo info(in_snap_name, in_snap_namespace,
@@ -513,6 +623,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 			 string in_snap_name,
 			 snap_t id)
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_wlocked(image_lock));
     snaps.erase(std::remove(snaps.begin(), snaps.end(), id), snaps.end());
     snap_info.erase(id);
@@ -521,12 +634,18 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   uint64_t ImageCtx::get_image_size(snap_t in_snap_id) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL2) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     if (in_snap_id == CEPH_NOSNAP) {
       if (!resize_reqs.empty() &&
           resize_reqs.front()->shrinking()) {
         return resize_reqs.front()->get_image_size();
       }
+      /* linanqinqin */
+      ldout(cct, LNQQ_DOUT_ImageCtx_LVL2) << this << " " << __func__ << " returned size directly" << dendl;
+      /* end */
       return size;
     }
 
@@ -538,6 +657,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   uint64_t ImageCtx::get_effective_image_size(snap_t in_snap_id) const {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     auto raw_size = get_image_size(in_snap_id);
     if (raw_size == 0) {
       return 0;
@@ -550,6 +672,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   uint64_t ImageCtx::get_object_count(snap_t in_snap_id) const {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     uint64_t image_size = get_image_size(in_snap_id);
     return Striper::get_num_objects(layout, image_size);
@@ -557,6 +682,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   bool ImageCtx::test_features(uint64_t features) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     std::shared_lock l{image_lock};
     return test_features(features, image_lock);
   }
@@ -564,12 +692,18 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   bool ImageCtx::test_features(uint64_t in_features,
                                const ceph::shared_mutex &in_image_lock) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     return ((features & in_features) == in_features);
   }
 
   bool ImageCtx::test_op_features(uint64_t in_op_features) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     std::shared_lock l{image_lock};
     return test_op_features(in_op_features, image_lock);
   }
@@ -577,12 +711,18 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   bool ImageCtx::test_op_features(uint64_t in_op_features,
                                   const ceph::shared_mutex &in_image_lock) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     return ((op_features & in_op_features) == in_op_features);
   }
 
   int ImageCtx::get_flags(librados::snap_t _snap_id, uint64_t *_flags) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     if (_snap_id == CEPH_NOSNAP) {
       *_flags = flags;
@@ -599,6 +739,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   int ImageCtx::test_flags(librados::snap_t in_snap_id,
                            uint64_t flags, bool *flags_set) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     std::shared_lock l{image_lock};
     return test_flags(in_snap_id, flags, image_lock, flags_set);
   }
@@ -608,6 +751,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
                            const ceph::shared_mutex &in_image_lock,
                            bool *flags_set) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     uint64_t snap_flags;
     int r = get_flags(in_snap_id, &snap_flags);
@@ -620,6 +766,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   int ImageCtx::update_flags(snap_t in_snap_id, uint64_t flag, bool enabled)
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_wlocked(image_lock));
     uint64_t *_flags;
     if (in_snap_id == CEPH_NOSNAP) {
@@ -642,6 +791,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   const ParentImageInfo* ImageCtx::get_parent_info(snap_t in_snap_id) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     if (in_snap_id == CEPH_NOSNAP)
       return &parent_md;
@@ -653,6 +805,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   int64_t ImageCtx::get_parent_pool_id(snap_t in_snap_id) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     const auto info = get_parent_info(in_snap_id);
     if (info)
       return info->spec.pool_id;
@@ -661,6 +816,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   string ImageCtx::get_parent_image_id(snap_t in_snap_id) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     const auto info = get_parent_info(in_snap_id);
     if (info)
       return info->spec.image_id;
@@ -669,6 +827,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   uint64_t ImageCtx::get_parent_snap_id(snap_t in_snap_id) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     const auto info = get_parent_info(in_snap_id);
     if (info)
       return info->spec.snap_id;
@@ -677,6 +838,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   int ImageCtx::get_parent_overlap(snap_t in_snap_id, uint64_t *overlap) const
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     const auto info = get_parent_info(in_snap_id);
     if (info) {
@@ -687,6 +851,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   void ImageCtx::register_watch(Context *on_finish) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(image_watcher != NULL);
     image_watcher->register_watch(on_finish);
   }
@@ -694,6 +861,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   uint64_t ImageCtx::prune_parent_extents(vector<pair<uint64_t,uint64_t> >& objectx,
 					  uint64_t overlap)
   {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     // drop extents completely beyond the overlap
     while (!objectx.empty() && objectx.back().first >= overlap)
       objectx.pop_back();
@@ -714,12 +884,18 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   void ImageCtx::cancel_async_requests() {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     C_SaferCond ctx;
     cancel_async_requests(&ctx);
     ctx.wait();
   }
 
   void ImageCtx::cancel_async_requests(Context *on_finish) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     {
       std::lock_guard async_ops_locker{async_ops_lock};
       if (!async_requests.empty()) {
@@ -739,6 +915,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
 
   void ImageCtx::apply_metadata(const std::map<std::string, bufferlist> &meta,
                                 bool thread_safe) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ldout(cct, 20) << __func__ << dendl;
 
     std::unique_lock image_locker(image_lock);
@@ -871,18 +1050,30 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   ExclusiveLock<ImageCtx> *ImageCtx::create_exclusive_lock() {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return new ExclusiveLock<ImageCtx>(*this);
   }
 
   ObjectMap<ImageCtx> *ImageCtx::create_object_map(uint64_t snap_id) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return new ObjectMap<ImageCtx>(*this, snap_id);
   }
 
   Journal<ImageCtx> *ImageCtx::create_journal() {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return new Journal<ImageCtx>(*this);
   }
 
   void ImageCtx::set_image_name(const std::string &image_name) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     // update the name so rename can be invoked repeatedly
     std::shared_lock owner_locker{owner_lock};
     std::unique_lock image_locker{image_lock};
@@ -893,22 +1084,34 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   void ImageCtx::notify_update() {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     state->handle_update_notification();
     ImageWatcher<>::notify_header_update(md_ctx, header_oid);
   }
 
   void ImageCtx::notify_update(Context *on_finish) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     state->handle_update_notification();
     image_watcher->notify_header_update(on_finish);
   }
 
   exclusive_lock::Policy *ImageCtx::get_exclusive_lock_policy() const {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(owner_lock));
     ceph_assert(exclusive_lock_policy != nullptr);
     return exclusive_lock_policy;
   }
 
   void ImageCtx::set_exclusive_lock_policy(exclusive_lock::Policy *policy) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_wlocked(owner_lock));
     ceph_assert(policy != nullptr);
     delete exclusive_lock_policy;
@@ -916,12 +1119,18 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   journal::Policy *ImageCtx::get_journal_policy() const {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_locked(image_lock));
     ceph_assert(journal_policy != nullptr);
     return journal_policy;
   }
 
   void ImageCtx::set_journal_policy(journal::Policy *policy) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     ceph_assert(ceph_mutex_is_wlocked(image_lock));
     ceph_assert(policy != nullptr);
     delete journal_policy;
@@ -929,6 +1138,9 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   void ImageCtx::rebuild_data_io_context() {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     auto ctx = std::make_shared<neorados::IOContext>(
       data_ctx.get_id(), data_ctx.get_namespace());
     if (snap_id != CEPH_NOSNAP) {
@@ -944,16 +1156,25 @@ librados::IoCtx duplicate_io_ctx(librados::IoCtx& io_ctx) {
   }
 
   IOContext ImageCtx::get_data_io_context() const {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     return atomic_load(&data_io_context);
   }
 
   IOContext ImageCtx::duplicate_data_io_context() const {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << this << " " << __func__ << dendl;
+    /* end */
     auto ctx = get_data_io_context();
     return std::make_shared<neorados::IOContext>(*ctx);
   }
 
   void ImageCtx::get_timer_instance(CephContext *cct, SafeTimer **timer,
                                     ceph::mutex **timer_lock) {
+    /* linanqinqin */
+    ldout(cct, LNQQ_DOUT_ImageCtx_LVL) << __func__ << dendl;
+    /* end */
     auto safe_timer_singleton =
       &cct->lookup_or_create_singleton_object<SafeTimerSingleton>(
 	"librbd::journal::safe_timer", false, cct);

@@ -22,7 +22,7 @@
 #undef dout_prefix
 #define dout_prefix *_dout
 
-#define LNQQ_DOUT_objclass_LVL 100
+#define LNQQ_DOUT_objclass_LVL 20
 /* end */
 
 using std::map;
@@ -136,6 +136,11 @@ int cls_get_request_origin(cls_method_context_t hctx, entity_inst_t *origin)
 }
 
 /* linanqinqin */
+std::string cls_get_request_src_ip(cls_method_context_t hctx) {
+  PrimaryLogPG::OpContext **pctx = static_cast<PrimaryLogPG::OpContext **>(hctx);
+  return (*pctx)->op->get_src_ip_str();
+}
+
 std::string cls_get_target_oid_name(cls_method_context_t hctx) {
   PrimaryLogPG::OpContext **pctx = static_cast<PrimaryLogPG::OpContext **>(hctx);
   return (*pctx)->new_obs.oi.soid.oid.name;
@@ -167,6 +172,9 @@ int cls_cxx_create(cls_method_context_t hctx, bool exclusive)
 
 int cls_cxx_remove(cls_method_context_t hctx)
 {
+  /* linanqinqin */
+  ldout(dout_context, 0) << "linanqinqin: " << __func__ << dendl;
+  /* end */
   PrimaryLogPG::OpContext **pctx = (PrimaryLogPG::OpContext **)hctx;
   vector<OSDOp> ops(1);
   ops[0].op.op = CEPH_OSD_OP_DELETE;
