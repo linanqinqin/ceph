@@ -265,6 +265,8 @@ public:
   int reset_dfork_dirty(IoCtx& io_ctx, const std::string &name, const std::string &id);
   int dfork_switch(IoCtx& io_ctx, const std::string &name, const std::string &id, 
                    bool switch_on, bool do_all, bool is_child);
+  int dfork_switch_v2(IoCtx& io_ctx, const std::string &name, 
+                      const std::string &id, bool switch_on, int mode);
   int dfork_remove(IoCtx& io_ctx, const std::string &name);
   int dfork_remove_with_progress(IoCtx& io_ctx, const std::string &name,
                                       ProgressContext& pctx);

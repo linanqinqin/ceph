@@ -366,12 +366,10 @@ void unblock_dirty_bit_updates_v3(librados::ObjectWriteOperation *op) {
   op->exec("rbd", "unblock_dirty_bit_updates_v3", bl);
 }
 
-void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, bool do_all, 
-                  bool is_child) {
+void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, int mode) {
   bufferlist bl;
   encode(switch_on, bl);
-  encode(do_all, bl);
-  encode(is_child, bl);
+  encode(mode, bl);
   op->exec("rbd", "dfork_switch", bl);
 }
 /* end */

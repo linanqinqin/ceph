@@ -957,12 +957,12 @@ int validate_pool(IoCtx &io_ctx, CephContext *cct) {
   }
 
   int dfork_switch(IoCtx& io_ctx, const std::string &image_name,
-                   const std::string &image_id, bool switch_on, bool do_all, bool is_child) {
+                   const std::string &image_id, bool switch_on, int mode) {
 
     C_SaferCond cond;
     image::DforkSwitchRequest<> *req = image::DforkSwitchRequest<>::create(
                                        io_ctx, image_name, image_id, 
-                                       switch_on, do_all, is_child, &cond);
+                                       switch_on, mode, &cond);
     req->send();
     int r = cond.wait();
 

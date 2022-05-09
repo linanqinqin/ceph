@@ -27,6 +27,14 @@ enum DforkDirtyBitState {
   DFORK_DIRTY_BIT_CLEAN = 0,
   DFORK_DIRTY_BIT_DIRTY = 1
 };
+
+// also defined in include/rbd/librbd.h
+enum {
+  RBD_DFORK_SWITCH_PARENT      = 0x0001,
+  RBD_DFORK_SWITCH_CHILD       = 0x0002,
+  RBD_DFORK_SWITCH_TRANSFER    = 0x0004,
+  RBD_DFORK_SWITCH_DOALL       = 0x0008
+};
 /* end */
 
 static const uint32_t MAX_OBJECT_MAP_OBJECT_COUNT = 256000000;

@@ -26,14 +26,12 @@ DforkSwitchRequest<I>::DforkSwitchRequest(IoCtx &ioctx,
                                           const std::string &image_name, 
                                           const std::string &image_id, 
                                           bool switch_on, 
-                                          bool do_all, 
-                                          bool is_child, 
+                                          int mode, 
                                           Context *on_finish)
   : m_image_name(image_name), 
     m_image_id(image_id), 
     m_switch_on(switch_on), 
-    m_do_all(do_all), 
-    m_is_child(is_child),
+    m_mode(mode), 
     m_on_finish(on_finish), 
     m_error_result(0) {
 
@@ -94,7 +92,7 @@ void DforkSwitchRequest<I>::send_dfork_switch() {
   ldout(m_cct, LNQQ_DOUT_DforkSwitchReq_LVL) << __func__ << dendl;
 
   librados::ObjectWriteOperation op;
-  cls_client::dfork_switch(&op, m_switch_on, m_do_all, m_is_child);
+  cls_client::dfork_switch(&op, m_switch_on, m_mode);
 
   using klass = DforkSwitchRequest<I>;
   librados::AioCompletion *comp =

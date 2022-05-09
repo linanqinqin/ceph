@@ -84,8 +84,7 @@ int check_dirty_bit_v3_finish(bufferlist::const_iterator *it, uint8_t *dirty);
 void unblock_dirty_bit_updates_v3(librados::ObjectWriteOperation *op);
 
 // new dfork design (improving cow performance)
-void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, bool do_all, 
-                  bool is_child);
+void dfork_switch(librados::ObjectWriteOperation *op, bool switch_on, int mode);
 /* end */
 
 void get_flags_start(librados::ObjectReadOperation *op, snapid_t snap_id);

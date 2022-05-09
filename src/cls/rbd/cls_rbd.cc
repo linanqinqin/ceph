@@ -47,6 +47,8 @@
 /* linanqinqin */
 // #include <chrono>
 #include <sys/stat.h>
+#include <filesystem>
+#include <fstream>
 #define LNQQ_DOUT_cls_rbd_LVL 100
 /* end */
 
@@ -4307,8 +4309,11 @@ int dfork_switch_old(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 int dfork_switch(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
 
   bool switch_on;
-  bool do_all;
+  int mode;
+  // bool do_all;   // currently not supported
   bool is_child;
+  bool is_parent;
+  bool is_transfer;
   int r;
   const std::string image_id = cls_get_target_rbd_image_name(hctx);
   const std::string src_ip = cls_get_request_src_ip(hctx);
@@ -4319,10 +4324,26 @@ int dfork_switch(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
   auto iter = in->cbegin();
   try {
     decode(switch_on, iter);
-    decode(do_all, iter);
-    decode(is_child, iter);
+    decode(mode, iter);
+    // decode(do_all, iter);
+    // decode(is_child, iter);
   } catch (const ceph::buffer::error &err) {
     return -EINVAL;
+  }
+
+  // do_all = (mode & cls::rbd::RBD_DFORK_SWITCH_DOALL)==cls::rbd::RBD_DFORK_SWITCH_DOALL;
+  is_child = (mode & cls::rbd::RBD_DFORK_SWITCH_CHILD)==cls::rbd::RBD_DFORK_SWITCH_CHILD;
+  is_parent = (mode & cls::rbd::RBD_DFORK_SWITCH_PARENT)==cls::rbd::RBD_DFORK_SWITCH_PARENT;
+  is_transfer = (mode & cls::rbd::RBD_DFORK_SWITCH_TRANSFER)==cls::rbd::RBD_DFORK_SWITCH_TRANSFER;
+
+  if (is_child + is_parent + is_transfer > 1) {
+    CLS_ERR("linanqinqin %s: please specify only one dfork mode", 
+            __func__);
+    return -EINVAL;
+  }
+  if (is_child + is_parent + is_transfer == 0) {
+    // no mode specified
+    return 0;
   }
 
   // // do_all ignored
@@ -4356,49 +4377,105 @@ int dfork_switch(cls_method_context_t hctx, bufferlist *in, bufferlist *out) {
     return r;
   }
 
+  std::error_code ec;
   if (switch_on) {
-    const std::string mkdir_str("mkdir -p " + entry_path);
-    entry_path += "/" + src_ip;
-    const std::string cmd_str((is_child?"touch ":"mkdir ") + entry_path);
+    // create the image's directory entry regardless
+    std::filesystem::create_directory(entry_path, ec);
 
-    std::system(mkdir_str.c_str());
-    std::system(cmd_str.c_str());
+    if (is_parent) {
+      std::filesystem::create_directory(entry_path+"/"+src_ip, ec);
 
-    // verify the entry existence
-    struct stat __buf;
-    r = stat(entry_path.c_str(), &__buf);
-    if (r < 0) {
-      CLS_ERR("linanqinqin %s: failed to switch on dfork mode for %s: %s", 
-              __func__, image_id.c_str(), cpp_strerror(r).c_str());
-    }
-    return r;
-  }
-  else {
-    entry_path += "/" + src_ip;
-    const std::string cmd_str("rm -rf " + entry_path);
-    struct stat __buf;
-    r = stat(entry_path.c_str(), &__buf);
-
-    if (r == 0) {
-      if ((S_ISDIR(__buf.st_mode) && (!is_child)) || 
-          ((!S_ISDIR(__buf.st_mode)) && is_child)) {
-        // delete the entry
-        std::system(cmd_str.c_str());
-        // verify the entry is gone
-        r = stat(entry_path.c_str(), &__buf);
-        if (r == 0) {
-          CLS_ERR("linanqinqin %s: failed to switch off dfork mode for %s: failed to remove the entry", 
-                  __func__, image_id.c_str());
-          return -EBUSY;
-        }
-        else {
-          return 0;
-        }
+      if (!std::filesystem::is_directory(entry_path+"/"+src_ip)) {
+        CLS_ERR("linanqinqin %s: failed to turn on parent mode for image %s host %s", 
+                __func__, image_id.c_str(), src_ip.c_str());
+        return -ENOENT;
       }
     }
+    else if (is_child) {
+      std::ofstream child_file(entry_path+"/"+src_ip);
+      child_file.close();
 
-    return 0;
+      if (!std::filesystem::is_regular_file(entry_path+"/"+src_ip)) {
+        CLS_ERR("linanqinqin %s: failed to turn on child mode for image %s host %s", 
+                __func__, image_id.c_str(), src_ip.c_str());
+        return -ENOENT;
+      }
+    }
+    else if (is_transfer) {
+      std::ofstream trans_file(entry_path+"/t-"+src_ip);
+      trans_file.close();
+
+      if (!std::filesystem::is_regular_file(entry_path+"/t-"+src_ip)) {
+        CLS_ERR("linanqinqin %s: failed to turn on transfer mode for image %s host %s", 
+                __func__, image_id.c_str(), src_ip.c_str());
+        return -ENOENT;
+      }
+    }
   }
+  else {
+
+    std::string to_delete;
+    if (is_transfer) {
+      to_delete = entry_path+"/t-"+src_ip;
+    }
+    else {
+      to_delete = entry_path+"/"+src_ip;
+    }
+
+    std::filesystem::remove(to_delete, ec);
+
+    if (std::filesystem::exists(to_delete)) {
+      CLS_ERR("linanqinqin %s: failed to turn off dfork mode for image %s host %s", 
+              __func__, image_id.c_str(), src_ip.c_str());
+      return -EEXIST;
+    }
+  }
+
+  return 0;
+
+  // if (switch_on) {
+  //   const std::string mkdir_str("mkdir -p " + entry_path);
+  //   entry_path += "/" + src_ip;
+  //   const std::string cmd_str((is_child?"touch ":"mkdir ") + entry_path);
+
+  //   std::system(mkdir_str.c_str());
+  //   std::system(cmd_str.c_str());
+
+  //   // verify the entry existence
+  //   struct stat __buf;
+  //   r = stat(entry_path.c_str(), &__buf);
+  //   if (r < 0) {
+  //     CLS_ERR("linanqinqin %s: failed to switch on dfork mode for %s: %s", 
+  //             __func__, image_id.c_str(), cpp_strerror(r).c_str());
+  //   }
+  //   return r;
+  // }
+  // else {
+  //   entry_path += "/" + src_ip;
+  //   const std::string cmd_str("rm -rf " + entry_path);
+  //   struct stat __buf;
+  //   r = stat(entry_path.c_str(), &__buf);
+
+  //   if (r == 0) {
+  //     if ((S_ISDIR(__buf.st_mode) && (!is_child)) || 
+  //         ((!S_ISDIR(__buf.st_mode)) && is_child)) {
+  //       // delete the entry
+  //       std::system(cmd_str.c_str());
+  //       // verify the entry is gone
+  //       r = stat(entry_path.c_str(), &__buf);
+  //       if (r == 0) {
+  //         CLS_ERR("linanqinqin %s: failed to switch off dfork mode for %s: failed to remove the entry", 
+  //                 __func__, image_id.c_str());
+  //         return -EBUSY;
+  //       }
+  //       else {
+  //         return 0;
+  //       }
+  //     }
+  //   }
+
+  //   return 0;
+  // }
 }
 /* end */
 

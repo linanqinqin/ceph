@@ -248,6 +248,31 @@ static int do_dfork_switch(const std::string &pool_name,
   return 0;
 }
 
+// v2 takes in an enum indicating dfork mode
+// (parent, child, or transfer)
+static int do_dfork_switch_v2(const std::string &pool_name, 
+                              const std::string &namespace_name,  
+                              const std::string &image_name, 
+                              const std::string &image_id, 
+                              bool switch_on, 
+                              int mode) {
+  librados::Rados rados; 
+  librados::IoCtx io_ctx; 
+  int r = utils::init(pool_name, namespace_name, &rados, &io_ctx); 
+  if (r < 0) {
+    return r;
+  }
+
+  librbd::RBD rbd;
+  r = rbd.dfork_switch_v2(io_ctx, image_name, image_id, switch_on, mode);
+  if (r < 0) {
+    std::cerr << "rbd: error switching dfork mode: "
+              << cpp_strerror(r) << std::endl;
+    return r;
+  }
+  return 0;
+}
+
 static int do_dfork_delete(const std::string &pool_name, 
                            const std::string &namespace_name,  
                            const std::string &image_name, 
@@ -274,7 +299,7 @@ static int do_dfork_transfer(const std::string &pool_name,
                              const std::string &namespace_name,  
                              const std::string &image_name, 
                              const std::string &image_id, 
-                             ssize_t size, 
+                             // ssize_t size, 
                              bool no_progress) {
   // librados::Rados rados;
   // librados::IoCtx io_ctx;
@@ -1134,8 +1159,8 @@ void get_dfork_transfer_arguments(po::options_description *positional,
   at::add_image_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
   at::add_image_id_option(options);
   at::add_no_progress_option(options);
-  options->add_options()
-    ("size", po::value<int>(), "the size of the I/O");
+  // options->add_options()
+  //   ("size", po::value<int>(), "the size of the I/O");
 }
 
 int execute_dfork_transfer(const po::variables_map &vm,
@@ -1171,13 +1196,174 @@ int execute_dfork_transfer(const po::variables_map &vm,
     return -EINVAL;
   }
 
-  ssize_t size = 0;
-  if (vm.count("size")) {
-    size = vm["size"].as<int>();
-  }
+  // ssize_t size = 0;
+  // if (vm.count("size")) {
+  //   size = vm["size"].as<int>();
+  // }
 
   r = do_dfork_transfer(pool_name, namespace_name, image_name, "",  
-                        size, vm[at::NO_PROGRESS].as<bool>());
+                        vm[at::NO_PROGRESS].as<bool>());
+
+  return r;
+}
+
+void get_collapse_arguments(po::options_description *positional,
+                            po::options_description *options) {
+  at::add_image_spec_options(positional, options, at::ARGUMENT_MODIFIER_NONE);
+  at::add_image_id_option(options);
+  at::add_no_progress_option(options);
+  options->add_options()
+    ("abort", po::bool_switch(), "abort the child if the dirty bit is set");
+  options->add_options()
+    ("promote", po::bool_switch(), "initiate atomic promotion if the dirty bit is clean");
+}
+
+int execute_collapse(const po::variables_map &vm,
+                     const std::vector<std::string> &ceph_global_init_args) {
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_name;
+  std::string snap_name;
+  std::string image_id;
+  int r;
+
+  if (vm.count(at::IMAGE_ID)) {
+    image_id = vm[at::IMAGE_ID].as<std::string>();
+  }
+
+  r = utils::get_pool_image_snapshot_names(
+    vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
+    &image_name, &snap_name, image_id.empty(),
+    utils::SNAPSHOT_PRESENCE_NONE, utils::SPEC_VALIDATION_NONE);
+  if (r < 0) {
+    return r;
+  }
+
+  // as of now, image_id not supported
+  if (image_name.empty()) {
+    std::cerr << "rbd: collapse needs an image name; image id not supported yet" 
+              << std::endl;
+    return -EOPNOTSUPP;
+  }
+
+  if (!image_id.empty() && !image_name.empty()) {
+    std::cerr << "rbd: trying to access image using both name and id. "
+              << std::endl;
+    return -EINVAL;
+  }
+  if (!snap_name.empty()) {
+    std::cerr << "rbd: operation not supported on snapshots. "
+              << std::endl;
+    return -EINVAL;
+  }
+
+  bool is_abort = vm["abort"].as<bool>();
+  bool is_promote = vm["promote"].as<bool>();
+  if (is_abort && is_promote) {
+    std::cerr << "rbd: please specify only one action (abort or promote). "
+              << std::endl;
+    return -EINVAL;
+  }
+
+  uint8_t dirty;
+  // r = do_check_dfork_dirty(pool_name, namespace_name, image_name, image_id,
+  //                          &dirty, is_promote, false);
+  r = do_check_dfork_dirty(pool_name, namespace_name, image_name, image_id,
+                           &dirty, false, false);
+  if (r < 0) {
+    std::cerr << "rbd: failed to check dfork dirty: " << cpp_strerror(r) 
+              << std::endl;
+    return -r;
+  }
+
+  // abort action
+  if (is_abort) {
+    // std::cout << "abort" << std::endl;
+    if (image_name.empty()) {
+      std::cerr << "rbd: must use image name to do abort" 
+                << std::endl;
+      return -ENOENT;
+    }
+
+    // don't necessarily need to turn off dfork mode
+    // r = do_dfork_switch_v2(pool_name, namespace_name, 
+    //                        image_name, image_id, false, false, true);
+    r = do_dfork_delete(pool_name, namespace_name, 
+                        image_name, vm[at::NO_PROGRESS].as<bool>());
+
+    return r;
+  }
+  // promote action
+  else if (is_promote) {
+    // std::cout << "promote" << std::endl;
+    if (!dirty) {
+      // the dirty bit is clean, now proceeding to atomic promotion
+      // std::cout << "can promote" << std::endl;
+
+      // turn on transfer mode
+      r = do_dfork_switch_v2(pool_name, namespace_name, image_name, image_id, 
+                             true, RBD_DFORK_SWITCH_TRANSFER);
+      if (r < 0) {
+        std::cerr << "rbd: promotion failed, unable to turn on transfer mode: " << cpp_strerror(r) 
+                  << std::endl;
+        return -r;
+      }
+
+      // turn off existing parent/child mode 
+      r = do_dfork_switch_v2(pool_name, namespace_name, image_name, image_id, 
+                             false, RBD_DFORK_SWITCH_CHILD);
+      // turn on parent mode (for after transfer is complete)
+      r = do_dfork_switch_v2(pool_name, namespace_name, image_name, image_id, 
+                             true, RBD_DFORK_SWITCH_PARENT);
+      if (r < 0) {
+        std::cerr << "rbd: promotion failed, unable to turn on parent mode: " << cpp_strerror(r) 
+                  << std::endl;
+        return -r;
+      }
+
+      // now, transfer objects
+      r = do_dfork_transfer(pool_name, namespace_name, image_name, image_id,  
+                            vm[at::NO_PROGRESS].as<bool>());
+      if (r < 0) {
+        std::cerr << "rbd: promotion failed, unable to transfer objects: " << cpp_strerror(r) 
+                  << std::endl;
+        return -r;
+      }
+
+      // second to last, turn off transfer mode
+      r = do_dfork_switch_v2(pool_name, namespace_name, image_name, image_id, 
+                             false, RBD_DFORK_SWITCH_TRANSFER);
+      if (r < 0) {
+        std::cerr << "rbd: promotion failed, unable to turn off transfer mode: " << cpp_strerror(r) 
+                  << std::endl;
+        return -r;
+      }
+
+      // finally, remove all child objects
+      r = do_dfork_delete(pool_name, namespace_name, 
+                          image_name, vm[at::NO_PROGRESS].as<bool>());
+      if (r < 0) {
+        std::cerr << "rbd: not all child objects successfully removed: " << cpp_strerror(r) 
+                  << "rbd: please use rbd collapse "
+                  << (image_name.empty() ? image_id : image_name) 
+                  << " --abort to clean up child objects"
+                  << std::endl;
+        return -r;
+      }
+    }
+    else {
+      std::cerr << "rbd: the dirty bit is already set, promotion rejected: " << cpp_strerror(-EPERM) 
+                << "\nrbd: please use rbd collapse "
+                << (image_name.empty() ? image_id : image_name) 
+                << " --abort to deallocate the child disk"
+                << std::endl;
+      return -EPERM;
+    }
+  }
+  else {
+    std::cout << (int) dirty << std::endl;
+  }
 
   return r;
 }
@@ -1207,6 +1393,9 @@ Shell::Action action_set_dirty(  // This is still with v2 dirty bit, no longer n
 Shell::Action action_transfer(
   {"dfork", "transfer"}, {}, "Transfer a dfork image (for internal use)", "",
   &get_dfork_transfer_arguments, &execute_dfork_transfer);
+Shell::Action action_collapse(
+  {"dfork", "collapse"}, {"collapse"}, "Collapse the disk superposition based on the value of the dirty bit", "",
+  &get_collapse_arguments, &execute_collapse);
 
 } // namespace dfork
 } // namespace action

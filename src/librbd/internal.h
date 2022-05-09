@@ -96,7 +96,7 @@ namespace librbd {
   int reset_dfork_dirty(IoCtx& io_ctx, const std::string &image_name, 
                         const std::string &image_id);
   int dfork_switch(IoCtx& io_ctx, const std::string &image_name,
-                   const std::string &image_id, bool switch_on, bool do_all, bool is_child);
+                   const std::string &image_id, bool switch_on, int mode);
   int dfork_remove(IoCtx& io_ctx, const std::string &name, ProgressContext& pctx);
   int dfork_transfer(IoCtx& io_ctx, const std::string &image_name,
                      const std::string &image_id);

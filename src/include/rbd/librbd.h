@@ -285,6 +285,17 @@ typedef enum {
 
 CEPH_RBD_API void rbd_version(int *major, int *minor, int *extra);
 
+/* linanqinqin */
+
+// also defined in cls/rbd/cls_rbd_types.h
+enum {
+  RBD_DFORK_SWITCH_PARENT      = 0x0001,
+  RBD_DFORK_SWITCH_CHILD       = 0x0002,
+  RBD_DFORK_SWITCH_TRANSFER    = 0x0004,
+  RBD_DFORK_SWITCH_DOALL       = 0x0008
+};
+/* end */
+
 /* image options */
 enum {
   RBD_IMAGE_OPTION_FORMAT = 0,

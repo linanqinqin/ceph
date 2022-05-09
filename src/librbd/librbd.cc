@@ -579,7 +579,25 @@ namespace librbd {
   int RBD::dfork_switch(IoCtx& io_ctx, const std::string &name, 
                         const std::string &id, bool switch_on, bool do_all, bool is_child) {
 
-    int r = librbd::dfork_switch(io_ctx, name, id, switch_on, do_all, is_child);
+    int mode = 0;
+    if (is_child) {
+      mode |= RBD_DFORK_SWITCH_CHILD;
+    }
+    else {
+      mode |= RBD_DFORK_SWITCH_PARENT;
+    }
+    if (do_all) {
+      mode |= RBD_DFORK_SWITCH_DOALL;
+    }
+
+    int r = librbd::dfork_switch(io_ctx, name, id, switch_on, mode);
+    return r;
+  }
+
+  int RBD::dfork_switch_v2(IoCtx& io_ctx, const std::string &name, 
+                           const std::string &id, bool switch_on, int mode) {
+
+    int r = librbd::dfork_switch(io_ctx, name, id, switch_on, mode);
     return r;
   }
 
