@@ -2497,7 +2497,7 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
           osd_op.op.op == CEPH_OSD_OP_WRITESAME) {
         is_write_op = true;
         is_noop_write = osd_op.op.extent.length == 1;
-        dout(0) << "linanqinqin do_op write " << oid.oid.name 
+        dout(10) << "linanqinqin do_op write " << oid.oid.name 
                 << " is_noop_write=" << is_noop_write << dendl;
       }
       else if (osd_op.op.op == CEPH_OSD_OP_READ || 
@@ -2581,18 +2581,18 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
 
       if (obc) {
         if (obc->obs.exists) {
-          dout(0) << "linanqinqin do_op parent " << oid.oid.name << " exists:"
+          dout(20) << "linanqinqin do_op parent " << oid.oid.name << " exists:"
                   << " is_write_op=" << is_write_op
                   << " is_read_op=" << is_read_op << dendl;
         }
         else {
-          dout(0) << "linanqinqin do_op parent " << oid.oid.name << " non-existent:"
+          dout(20) << "linanqinqin do_op parent " << oid.oid.name << " non-existent:"
                   << " is_write_op=" << is_write_op
                   << " is_read_op=" << is_read_op << dendl;
         }
       }
       else {
-        dout(0) << "linanqinqin do_op parent " << oid.oid.name << " non-existent:"
+        dout(20) << "linanqinqin do_op parent " << oid.oid.name << " non-existent:"
                 << " is_write_op=" << is_write_op
                 << " is_read_op=" << is_read_op << dendl;
       }
@@ -2716,12 +2716,12 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
               if (parent_obc->obs.oi.is_dfork_transfer_done()) {
                 // this is when both parent and child exist but transfer is already done
                 // fall below to go to parent
-                dout(0) << "linanqinqin parent: both, done" << dendl;
+                dout(10) << "linanqinqin parent: both, done" << dendl;
               }
               else {
                 // this is when both parent and child exist but transfer is not done yet
                 // need to go to child
-                dout(0) << "linanqinqin child: both, not done" << dendl;
+                dout(10) << "linanqinqin child: both, not done" << dendl;
                 break;
               }
             }
@@ -2730,12 +2730,12 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
               if (is_in_transfer) {
                 // this is when child exists but not parent, and is a transfer write
                 // need to go to parent
-                dout(0) << "linanqinqin parent: child, transfer" << dendl;
+                dout(10) << "linanqinqin parent: child, transfer" << dendl;
               }
               else {
                 // this is when child exists but not parent, not a transfer write
                 // need to go to child
-                dout(0) << "linanqinqin child: child, not transfer" << dendl;
+                dout(10) << "linanqinqin child: child, not transfer" << dendl;
                 break;
               }
             }
@@ -2745,12 +2745,12 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
             if (is_in_transfer) {
               // this is when child exists but not parent, and is a transfer write
               // need to go to parent
-              dout(0) << "linanqinqin parent: child, transfer" << dendl;
+              dout(10) << "linanqinqin parent: child, transfer" << dendl;
             }
             else {
               // this is when child exists but not parent, not a transfer write
               // need to go to child
-              dout(0) << "linanqinqin child: child, not transfer" << dendl;
+              dout(10) << "linanqinqin child: child, not transfer" << dendl;
               break;
             }
           }
@@ -2791,7 +2791,7 @@ void PrimaryLogPG::do_op(OpRequestRef& op)
         oid, &obc, can_create,
         m->has_flag(CEPH_OSD_FLAG_MAP_SNAP_CLONE),
         &missing_oid); 
-      dout(0) << "linanqinqin do_op transfer parent " << oid.oid.name 
+      dout(20) << "linanqinqin do_op transfer parent " << oid.oid.name 
               << " is_in_transfer=" << is_in_transfer << dendl;
     break;
 
@@ -6823,12 +6823,12 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       /* linanqinqin */
       // dout(0) << "linanqinqin do_osd_op CEPH_OSD_OP_READ " << soid.oid.name
       //         << " " << CEPH_OSD_OP_READ << dendl;
-        if (soid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0) {
-          dout(0) << "linanqinqin do_osd_ops read " << soid.oid.name 
-                  << " off=" << op.extent.offset 
-                  << " len=" << op.extent.length 
-                  << " is_transfer=" << (op.flags) << dendl;
-        }
+        // if (soid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0) {
+        //   dout(0) << "linanqinqin do_osd_ops read " << soid.oid.name 
+        //           << " off=" << op.extent.offset 
+        //           << " len=" << op.extent.length 
+        //           << " is_transfer=" << (op.flags) << dendl;
+        // }
       /* end */
       ++ctx->num_read;
       /* linanqinqin */
@@ -7615,10 +7615,10 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
           trans_op.op.extent.length = 0;
 
           // read the child data
-          int r = do_osd_ops(ctx, trans_ops);
-          dout(0) << "linanqinqin do_osd_ops transfer read " << soid.oid.name
-                  << " r=" << r 
-                  << " outdata=" << trans_op.outdata.length() << dendl;
+          do_osd_ops(ctx, trans_ops);
+          // dout(0) << "linanqinqin do_osd_ops transfer read " << soid.oid.name
+          //         << " r=" << r 
+          //         << " outdata=" << trans_op.outdata.length() << dendl;
 
           // // mark child as transfer done
           // trans_op.op.op = CEPH_OSD_OP_WRITE;
@@ -7664,12 +7664,12 @@ int PrimaryLogPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
           obs.oi.set_dfork_transfer_done();
         }
 
-        if (soid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0) {
-          dout(0) << "linanqinqin do_osd_ops write " << soid.oid.name 
-                  << " off=" << op.extent.offset 
-                  << " len=" << op.extent.length 
-                  << " is_transfer=" << (op.flags) << dendl;
-        }
+        // if (soid.oid.name.rfind(RBD_DATA_PREFIX, 0) == 0) {
+        //   dout(0) << "linanqinqin do_osd_ops write " << soid.oid.name 
+        //           << " off=" << op.extent.offset 
+        //           << " len=" << op.extent.length 
+        //           << " is_transfer=" << (op.flags) << dendl;
+        // }
       /* end */
         __u32 seq = oi.truncate_seq;
   tracepoint(osd, do_osd_op_pre_write, osd->whoami, soid.oid.name.c_str(), soid.snap.val, oi.size, seq, op.extent.offset, op.extent.length, op.extent.truncate_size, op.extent.truncate_seq);

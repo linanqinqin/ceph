@@ -328,6 +328,48 @@ void get_unmap_arguments(po::options_description *positional,
 
 int execute_unmap(const po::variables_map &vm,
                   const std::vector<std::string> &ceph_global_init_args) {
+  /* linanqinqin */
+  size_t arg_index = 0;
+  std::string pool_name;
+  std::string namespace_name;
+  std::string image_name;
+  std::string snap_name;
+  std::string image_id;
+  int r;
+
+  if (vm.count(at::IMAGE_ID)) {
+    image_id = vm[at::IMAGE_ID].as<std::string>();
+  }
+
+  r = utils::get_pool_image_snapshot_names(
+    vm, at::ARGUMENT_MODIFIER_NONE, &arg_index, &pool_name, &namespace_name,
+    &image_name, &snap_name, image_id.empty(),
+    utils::SNAPSHOT_PRESENCE_NONE, utils::SPEC_VALIDATION_NONE);
+  if (r < 0) {
+    return r;
+  }
+
+  if (!image_id.empty() && !image_name.empty()) {
+    std::cerr << "rbd: trying to access image using both name and id. "
+              << std::endl;
+    return -EINVAL;
+  }
+  if (!snap_name.empty()) {
+    std::cerr << "rbd: operation not supported on snapshots. "
+              << std::endl;
+    return -EINVAL;
+  }
+
+  // switch off any mode
+  r = do_dfork_switch(pool_name, namespace_name, 
+                      image_name, image_id, false, false, false);
+  r = do_dfork_switch(pool_name, namespace_name, 
+                      image_name, image_id, false, false, true);
+  if (r < 0) {
+    return r;
+  }
+
+  /* end */
   return (*get_device_operations(vm)->execute_unmap)(vm, ceph_global_init_args);
 }
 

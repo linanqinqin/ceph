@@ -120,6 +120,7 @@ void DforkTransferRequest<I>::send_dfork_transfer() {
   auto it = m_object_map.begin();
   auto end_it = m_object_map.end();
   uint64_t pos = 0;
+  uint64_t omap_size = m_object_map.size();
   for (; it!=end_it; ++it, ++pos) {
     if (*it != OBJECT_NONEXISTENT) {
 
@@ -141,9 +142,23 @@ void DforkTransferRequest<I>::send_dfork_transfer() {
       // issue the transfer write
       r = m_io_ctx.write(data_oid, write_bl, len, off);
 
-      std::cout << "object " << data_oid << " may exist, r=" << r << std::endl;
+      if (pos % 1000 == 0) {
+        std::cout << "                                         "
+                  << "                                         \r";
+        std::cout << "rbd collapse transferring child objects: " 
+                  << ((pos+1)*100)/omap_size
+                  << "%% complete...\r";
+        std::cout.flush();
+      }
     }
   }
+
+  std::cout << "                                         "
+            << "                                         \r";
+  std::cout << "rbd collapse transferring child objects: " 
+            << "100%% complete..." 
+            << std::endl;
+  std::cout.flush();
 
   complete(0);
 }

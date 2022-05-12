@@ -20,6 +20,7 @@
 /* linanqinqin */
 #include "librbd/ObjectMap.h"
 #include "common/bit_vector.hpp"
+#include <fstream>
 /* end */
 
 #define dout_subsys ceph_subsys_rbd
@@ -358,12 +359,12 @@ Context *OpenRequest<I>::handle_v2_get_initial_metadata(int *result) {
     return nullptr;
   }
   
-  if (get_object_map()) {
-    lderr(cct) << "failed to read the object map: "
-               << cpp_strerror(*result) << dendl;
-    send_close_image(*result);
-    return nullptr;
-  }
+  // if (get_object_map()) {
+  //   lderr(cct) << "failed to read the object map: "
+  //              << cpp_strerror(*result) << dendl;
+  //   send_close_image(*result);
+  //   return nullptr;
+  // }
   /* end */
 
   if (m_image_ctx->test_features(RBD_FEATURE_STRIPINGV2)) {
@@ -392,14 +393,22 @@ int OpenRequest<I>::get_object_map() {
   // int cnt_nonexistent=0, cnt_exists=0, cnt_pending=0, cnt_clean=0;
   int obj_cnt[4] = {0};
   int obj_total = 0;
+  std::ofstream obj_file("/mnt/ceph/build/"+(m_image_ctx->name)+".omap");
   for (; it != end_it; ++it) {
     // objmap_str += *it+'0';
     // if (*it == OBJECT_EXISTS || *it == OBJECT_PENDING) {
     //   obj_dirty += 1;
     // }
+    if (*it == OBJECT_NONEXISTENT) {
+      obj_file << '0' ;
+    }
+    else {
+      obj_file << '1' ;
+    }
     obj_total += 1;
     obj_cnt[*it] += 1;
   }
+  obj_file.close();
 
   std::cout << "linanqinqin object_map for " << m_image_ctx->id << ": " 
             << obj_total << " "
